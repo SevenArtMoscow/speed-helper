@@ -18,18 +18,17 @@ PostgreSQL (Supabase): таблицы закрыты RLS без политик; 
 - **Бэкенд** (`supabase/`): схема БД, серверные функции для основной цепочки, проверка initData.
 - **Локальный движок** (`js/local-backend.js`): те же правила на localStorage — для разработки без Supabase. Демо-данных нет.
 
-## Что серверная часть ещё не делает (в SQL нет, работает только локальный движок)
-`withdraw, toggleFav, favorites, favIds, contractorPage, workerPage, contractorStats, updateShift, team, myTeams, setSenior, removeMember, setAttendance, pinMessage, dmInfo, myDialogs, pendingReviews, admin*`.
-Диспетчер `public.api` возвращает `not_implemented` для них. Порядок: contractorStats/updateShift/team → избранное → админка → документы.
+## Серверная часть
+Все методы клиента реализованы в `002_api.sql` + `003_api_more.sql` (SQL пока не запускался на реальном Postgres — сначала прогнать на тестовом проекте).
+Уведомления: `notifications` → Edge Function `tg-notify` (Bot API). Пользователь получит сообщение, только если хоть раз нажал Start у бота.
 
 ## Не сделано вообще (по ТЗ)
-Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; ИИ-помощник на LLM (сейчас правила в `parseShiftText`);
-отправка уведомлений в Telegram (воркер); Sentry; бэкапы; нагрузочные тесты; staging-среда.
+Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; ИИ-помощник на LLM (сейчас правила в `parseShiftText`); Sentry; бэкапы; нагрузочные тесты; staging-среда.
 
 ## Развёртывание Supabase
 1. Проект Supabase на аккаунте **владельцев** (ТЗ §45).
-2. SQL Editor: выполнить `001_schema.sql`, затем `002_api.sql`.
-3. Secrets: `TG_BOT_TOKEN`, `JWT_SECRET`; `supabase functions deploy tg-auth`.
+2. SQL Editor: выполнить `001_schema.sql`, `002_api.sql`, `003_api_more.sql` по порядку.
+3. Secrets: `TG_BOT_TOKEN`, `JWT_SECRET`; `supabase functions deploy tg-auth tg-notify`; для рассылки ещё `APP_URL`, `CRON_SECRET` и pg_cron-задача раз в минуту, вызывающая `tg-notify` с заголовком `x-cron-secret`.
 4. В `js/config.js` указать `SUPABASE_URL` и `SUPABASE_ANON_KEY` (публичный).
 5. Владельцу: `update users set is_admin = true where tg_id = <его Telegram ID>`.
 6. В BotFather задать URL мини-приложения.
