@@ -1,5 +1,19 @@
-# SPEED HELPER — архитектура (первичная)
+# SPEED HELPER — архитектура
 
+## Прод (VPS)
+```
+Telegram ──► https://speedhelper.ru (nginx, Let's Encrypt) ──► server/server.js (Node, systemd: speedhelper)
+               GET  /*          статика мини-приложения
+               POST /api/auth   initData → проверка HMAC (токен бота) → upsert users(tg_id) → JWT (sub = users.id, 7 дней)
+               POST /api/rpc    {fn,args} + JWT → begin; set_config('request.jwt.claims'); select public.api(fn,args)
+                                  ▼
+                               PostgreSQL: те же миграции supabase/migrations/* (+ server/migrations/000_roles.sql), применяются при старте
+             server/bot.js     long polling: /start, /help, кнопка меню «Открыть»; рассылка notifications (каждые 3 с)
+```
+Ссылка из уведомления открывает нужный экран: `https://speedhelper.ru/?r=/c/shift/5` → `#/c/shift/5`.
+Секреты (`TG_BOT_TOKEN`, `JWT_SECRET`, `DATABASE_URL`) — только в `server/.env` на сервере.
+
+## Вариант с Supabase (не используется в проде)
 ```
 Telegram Mini App (статика: GitHub Pages / Netlify / Cloudflare)
    │  1. initData ──► Edge Function tg-auth: проверка HMAC, upsert users(tg_id), выдача JWT (sub = users.id)
@@ -19,7 +33,7 @@ PostgreSQL (Supabase): таблицы закрыты RLS без политик; 
 - **Локальный движок** (`js/local-backend.js`): те же правила на localStorage — для разработки без Supabase. Демо-данных нет.
 
 ## Серверная часть
-Все методы клиента реализованы в `002_api.sql` + `003_api_more.sql` (SQL пока не запускался на реальном Postgres — сначала прогнать на тестовом проекте).
+Все методы клиента реализованы в `002_api.sql` + `003_api_more.sql` (SQL прогнан на PostgreSQL сквозным тестом: вход, анкеты, смена, отклик, принятие, чаты, завершение, отзыв, админка).
 Уведомления: `notifications` → Edge Function `tg-notify` (Bot API). Пользователь получит сообщение, только если хоть раз нажал Start у бота.
 
 ## Не сделано вообще (по ТЗ)

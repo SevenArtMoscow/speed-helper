@@ -89,6 +89,9 @@ async function boot() {
     ctx.render(`<div class="empty"><h2>Не удалось войти</h2><p>${esc(errMsg(e))}</p>${tg ? '' : '<p class="sm">Откройте приложение через Telegram-бота.</p>'}<button class="btn pri" onclick="location.reload()">Повторить</button></div>`);
     return;
   }
+  // переход из уведомления бота: ?r=/c/shift/5 → #/c/shift/5
+  const deep = new URLSearchParams(location.search).get('r');
+  if (deep && /^\/[\w\/-]*$/.test(deep)) history.replaceState(null, '', location.pathname + '#' + deep);
   S.role = localStorage.getItem('sh_role_' + S.user.id);
   if (!S.role && S.user.roles.length === 1) S.role = S.user.roles[0];
   setBell();

@@ -242,7 +242,7 @@ declare me bigint := _me(); r jsonb;
     'adminStats','adminUsers','adminBlock','adminVerify','adminShifts','adminHideShift','adminReports','adminResolveReport','adminCategories','adminSaveCategory','adminAudit'];
 begin
   if not (fn = any(allowed)) then perform _fail('not_implemented', 'Неизвестный метод: ' || fn); end if;
-  execute format('select public.%I($1,$2)', 'api_' || fn) into r using me, coalesce(args, '[]'::jsonb);
+  execute format('select public.%I($1,$2)', lower('api_' || fn)) into r using me, coalesce(args, '[]'::jsonb); -- функции без кавычек хранятся в нижнем регистре
   return r;
 end $$;
 

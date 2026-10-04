@@ -83,7 +83,7 @@ begin
     coalesce((p->>'medbook')::boolean, false), coalesce((p->>'selfemployed')::boolean, false), coalesce((p->>'night')::boolean, false), coalesce((p->>'tools')::boolean, false))
   on conflict (user_id) do update set name = excluded.name, city = excluded.city, age = excluded.age, avatar = excluded.avatar, phone = excluded.phone, about = excluded.about,
     experience = excluded.experience, skills = excluded.skills, license = excluded.license, medbook = excluded.medbook, selfemployed = excluded.selfemployed, night = excluded.night, tools = excluded.tools, updated_at = now();
-  update users set roles = array(select distinct unnest(roles || 'worker')) where id = me;
+  update users set roles = array(select distinct unnest(roles || 'worker'::text)) where id = me;
   return api_me(me, a);
 end $$;
 
@@ -95,7 +95,7 @@ begin
   if length(ph) < 10 then perform _fail('invalid', 'Укажите телефон'); end if;
   insert into contractor_profiles(user_id, name, company, city, phone, about, avatar) values (me, trim(p->>'name'), p->>'company', trim(p->>'city'), ph, p->>'about', p->>'avatar')
   on conflict (user_id) do update set name = excluded.name, company = excluded.company, city = excluded.city, phone = excluded.phone, about = excluded.about, avatar = coalesce(excluded.avatar, contractor_profiles.avatar), updated_at = now();
-  update users set roles = array(select distinct unnest(roles || 'contractor')) where id = me;
+  update users set roles = array(select distinct unnest(roles || 'contractor'::text)) where id = me;
   return api_me(me, a);
 end $$;
 
@@ -103,7 +103,7 @@ end $$;
 create or replace function api_feed(me bigint, a jsonb) returns jsonb language plpgsql stable as $$
 declare f jsonb := coalesce(a->0, '{}'); olat double precision := coalesce((f->>'lat')::float, 55.7558); olng double precision := coalesce((f->>'lng')::float, 37.6173);
   off int := coalesce((f->>'offset')::int, 0); lim int := least(coalesce((f->>'limit')::int, 20), 200); rad float := (f->>'radius_km')::float;
-  cats int[] := coalesce(array(select jsonb_array_elements_text(coalesce(f->'categories','[]'))::int), '{}'); res jsonb; tot int;
+  cats int[] := coalesce(array(select jsonb_array_elements_text(coalesce(f->'categories','[]'))::int), '{}'); res jsonb; v_total int;
 begin
   with base as (
     select s.id, s.date as d, s.start_time as st,
@@ -118,8 +118,8 @@ begin
   ), filt as (select *, count(*) over () as tot from base where rad is null or dist is null or dist <= rad),
   page as (select * from filt order by d, st, id desc limit lim offset off)
   select coalesce(jsonb_agg(_shift_json(s, me, olat, olng) order by p.d, p.st, p.id desc), '[]'), coalesce((select max(tot) from filt), 0)
-    into res, tot from page p join shifts s on s.id = p.id;
-  return jsonb_build_object('items', res, 'total', tot, 'next', case when off + lim < tot then off + lim end);
+    into res, v_total from page p join shifts s on s.id = p.id;
+  return jsonb_build_object('items', res, 'total', v_total, 'next', case when off + lim < v_total then off + lim end);
 end $$;
 
 create or replace function api_getShift(me bigint, a jsonb) returns jsonb language plpgsql stable as $$
@@ -309,7 +309,7 @@ declare me bigint := _me(); r jsonb;
     'applicants','decide','cancelShift','completeShift','messages','sendMessage','submitReview','notifications','markRead','report','track','logError'];
 begin
   if not (fn = any(allowed)) then perform _fail('not_implemented', 'Метод ещё не реализован на сервере: ' || fn); end if;
-  execute format('select public.%I($1,$2)', 'api_' || fn) into r using me, coalesce(args, '[]'::jsonb);
+  execute format('select public.%I($1,$2)', lower('api_' || fn)) into r using me, coalesce(args, '[]'::jsonb); -- функции без кавычек хранятся в нижнем регистре
   return r;
 end $$;
 revoke all on function public.api(text, jsonb) from public, anon;
