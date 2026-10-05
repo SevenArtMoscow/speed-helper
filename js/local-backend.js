@@ -390,7 +390,9 @@ const API = {
   myDialogs(me) {
     actor(me);
     const apps = db.applications.filter((a) => { const s = db.shifts.find((x) => x.id === a.shift_id); return a.worker_id === me || (s && s.contractor_id === me); });
-    return apps.map((a) => { const last = [...db.messages].reverse().find((m) => m.scope === 'dm:' + a.id); return last ? { app_id: a.id, last: msgView(last), info: API.dmInfo(me, a.id) } : null; }).filter(Boolean).sort((x, y) => y.last.at - x.last.at);
+    // диалог по отклику виден сразу (в ожидании / принят), даже до первого сообщения
+    return apps.map((a) => { const last = [...db.messages].reverse().find((m) => m.scope === 'dm:' + a.id); return last || ['pending', 'accepted'].includes(a.status) ? { app_id: a.id, last: last ? msgView(last) : null, info: API.dmInfo(me, a.id) } : null; })
+      .filter(Boolean).sort((x, y) => (y.last ? y.last.at : 0) - (x.last ? x.last.at : 0));
   },
 
   // ----- отзывы -----

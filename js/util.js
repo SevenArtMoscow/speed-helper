@@ -60,4 +60,11 @@ export function resizeImage(file, size = 256) {
   });
 }
 
-export const initials = (name) => (name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+// Телефон РФ: храним 10 цифр без кода страны, показываем «+7 (916) 123-45-67»
+export const phone10 = (v) => { const d = String(v || '').replace(/\D/g, ''); return d.length >= 11 && /^[78]/.test(d) ? d.slice(1, 11) : d.slice(0, 10); };
+export function fmtPhone(v) {
+  const d = phone10(v); if (!d) return '';
+  return '+7 (' + d.slice(0, 3) + (d.length >= 3 ? ') ' : '') + d.slice(3, 6) + (d.length > 6 ? '-' + d.slice(6, 8) : '') + (d.length > 8 ? '-' + d.slice(8, 10) : '');
+}
+
+export const initials =(name) => (name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();

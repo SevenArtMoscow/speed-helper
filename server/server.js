@@ -110,8 +110,9 @@ function serveStatic(req, res) {
   const file = path.join(ROOT, p);
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
-    const html = p.endsWith('.html') || p === '/sw.js';
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': html ? 'no-cache' : 'public, max-age=300' });
+    // код приложения (html/js/css) — всегда свежий: модули без версий в URL, иначе после обновления смешаются старые и новые файлы
+    const code = /\.(html|js|css)$/.test(p);
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': code ? 'no-cache' : 'public, max-age=300' });
     res.end(data);
   });
 }

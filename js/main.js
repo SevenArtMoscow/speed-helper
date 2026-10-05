@@ -26,6 +26,7 @@ function shell() {
   app.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-act]'); if (!el || el.dataset.busy) return;
     const name = el.dataset.act;
+    if (el.tagName === 'A') e.preventDefault(); // ссылки-действия href="#" не должны уводить на главную
     if (name === 'back') return back();
     if (name === 'bell') return go('#/notifications');
     const fn = ctx.acts[name]; if (!fn) return;

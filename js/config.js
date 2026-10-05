@@ -11,6 +11,9 @@ export const CONFIG = {
   AUTH_FUNCTION: 'tg-auth',
   APP_VERSION: '1.0.0',
   DEFAULT_CITY: { name: 'Москва', lat: 55.7558, lng: 37.6173 },
+  // Яндекс Карты: ключи из https://developer.tech.yandex.ru (публичные; в кабинете ограничить по HTTP Referer: speedhelper.ru)
+  YANDEX_MAPS_KEY: '',     // «JavaScript API и HTTP Геокодер» — карта и проверка адресов
+  YANDEX_SUGGEST_KEY: '',  // «API Геосаджеста» — подсказки адресов при вводе (необязательно)
   MIN_VERIFIED_PERCENT: 80,
   POLL_MS: 4000,
 };

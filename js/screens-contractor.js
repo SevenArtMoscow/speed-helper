@@ -1,7 +1,8 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, pickLocation, toggle, refreshMe } from './ui.js';
-import { esc, dateLabel, money, todayISO, addDays, uid, plural } from './util.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe } from './ui.js';
+import { pickLocation, geocode, attachSuggest } from './maps.js';
+import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
 import { profileBlock, roleSwitch, devPanel, bindCommonProfile } from './screens-worker.js';
 
@@ -71,7 +72,7 @@ async function createOrEdit(ctx, id) {
     <label class="f">Название смены *</label><input class="i" id="title" value="${esc(d.title || '')}" placeholder="Например: Разгрузка мебели" ${lock}>
     <label class="f">Категория *</label><select class="i" id="cat" ${lock}><option value="">Выберите…</option>${S.cats.map((c) => `<option value="${c.id}" ${d.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
     <label class="f">Описание</label><textarea class="i" id="desc" placeholder="Что нужно делать">${esc(d.description || '')}</textarea>
-    <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Точка на карте указана' : 'Нажмите 📍, чтобы найти адрес на карте и поставить точку'}</div>
+    <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Введите адрес с номером дома — мы проверим его по Яндекс Картам'}</div>
     <div class="grid2"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
     <div class="grid2"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${esc(d.end || '18:00')}"></div></div>
     <label class="f">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}">
@@ -84,7 +85,31 @@ async function createOrEdit(ctx, id) {
   ctx.acts.req = (el) => { const r = el.dataset.r; reqs.has(r) ? reqs.delete(r) : reqs.add(r); drawReqs(); }; // повторное нажатие отключает тег
   ctx.acts.tg = (el) => el.classList.toggle('on');
   ctx.acts.addreq = () => { const s = sheet('<h3>Своё требование</h3><input class="i" id="nr" maxlength="40"><button class="btn pri block" style="margin-top:12px" id="ok">Добавить</button>'); s.el.querySelector('#ok').onclick = () => { const t = s.el.querySelector('#nr').value.trim(); if (t) { custom.push(t); reqs.add(t); drawReqs(); } s.close(); }; };
-  ctx.acts.pin = async () => { const r = await pickLocation({ ...(geo || {}), query: val('addr') }); if (r) { geo = { lat: r.lat, lng: r.lng }; if (r.address && !val('addr')) document.getElementById('addr').value = r.address; document.getElementById('geo').className = 'sm g'; document.getElementById('geo').textContent = '✓ Точка на карте указана'; } };
+  // ----- адрес: проверка существования через геокодер Яндекса (до номера дома) -----
+  const addrEl = document.getElementById('addr');
+  let geoFor = geo ? addrEl.value : null, checkSeq = 0; // для какого текста адреса найдена точка
+  const geoInfo = (t, cls) => { const el = document.getElementById('geo'); if (el) { el.className = 'sm ' + cls; el.textContent = t; } };
+  const setGeo = (p, address, text) => { geo = { lat: p.lat, lng: p.lng }; if (address) addrEl.value = address; geoFor = addrEl.value; geoInfo(text, 'g'); };
+  const checkAddr = async () => {
+    const q = addrEl.value.trim(), my = ++checkSeq;
+    if (geo && q === geoFor) return true;
+    geo = null; if (q.length < 3) { geoInfo('Введите адрес с номером дома — мы проверим его по Яндекс Картам', 'mut'); return false; }
+    geoInfo('Проверяем адрес…', 'mut');
+    let g; try { g = await geocode(q); } catch (e) { geoInfo('Не удалось проверить адрес: ' + e.message + '. Укажите точку 📍', 'r'); return false; }
+    if (my !== checkSeq) return !!geo; // пока проверяли, адрес изменили
+    if (!g) { geoInfo('✗ Такой адрес не найден. Проверьте город, улицу и дом или укажите точку 📍', 'r'); return false; }
+    if (!g.ok) { geoInfo(`⚠ Не нашли дом: «${g.address}». Добавьте номер дома или поставьте точку 📍`, 'y'); return false; }
+    setGeo(g, g.address, '✓ Адрес найден на Яндекс Картах'); return true;
+  };
+  if (!editing) {
+    addrEl.addEventListener('input', () => { if (addrEl.value.trim() !== geoFor) { geo = null; geoInfo('Адрес будет проверен по Яндекс Картам', 'mut'); } });
+    addrEl.addEventListener('change', checkAddr);
+    attachSuggest(addrEl, (text) => { addrEl.value = text; checkAddr(); }).catch(() => {});
+  }
+  ctx.acts.pin = async () => {
+    const r = await pickLocation({ ...(geo || {}), query: val('addr') });
+    if (r) setGeo(r, r.address, r.ok ? '✓ Адрес указан на карте' : '✓ Точка на карте указана — проверьте текст адреса');
+  };
   ctx.acts.ai = () => {
     const s = sheet('<h3>ИИ-ассистент</h3><p class="mut sm">Опишите смену обычными словами — мы предложим заполнение полей, а вы проверите.</p><textarea class="i" id="t" placeholder="Завтра нужны четыре человека разгружать мебель в Химках с 9 до 18, оплата 4500"></textarea><button class="btn pri block" style="margin-top:12px" id="ok">Заполнить</button>');
     s.el.querySelector('#ok').onclick = () => {
@@ -99,7 +124,7 @@ async function createOrEdit(ctx, id) {
       await api.updateShift(id, { pay: val('pay'), people: val('people'), start: val('start'), end: val('end'), description: val('desc').trim(), requirements: [...reqs] });
       toast('Смена обновлена', 'ok'); return go('#/c/shift/' + id);
     }
-    if (!geo) return toast('Укажите точку на карте (📍) — исполнители ищут смены по расстоянию', 'err');
+    if (!(await checkAddr())) return toast('Адрес не найден. Уточните улицу и дом или поставьте точку на карте (📍)', 'err');
     const s = await api.createShift({ title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') }, reqId);
     track('shift_created', { id: s.id }); toast('Смена опубликована', 'ok'); go('#/c/shift/' + s.id);
   };
@@ -162,7 +187,7 @@ async function fav(ctx) {
 async function profile(ctx) {
   const u = await refreshMe(), c = u.contractor;
   ctx.render(`<h1>Профиль</h1><div class="card row">${avatar(c.avatar, c.name, 'lg')}<div class="grow"><h1 style="margin:0">${esc(c.name)}</h1>${c.company ? `<div class="mut">${esc(c.company)}</div>` : ''}<div>${stars(c.rating, c.reviews)}</div><div class="mut sm">${c.shifts_done} проведённых смен · ${esc(c.city)}</div>${verifiedTag(c.verified, 'Проверенный подрядчик')}</div></div>
-    ${c.about ? `<p>${esc(c.about)}</p>` : ''}<div class="card row sp"><span class="mut">Телефон</span><span>+7 ${esc(c.phone)}</span></div>
+    ${c.about ? `<p>${esc(c.about)}</p>` : ''}<div class="card row sp"><span class="mut">Телефон</span><span>${esc(fmtPhone(c.phone))}</span></div>
     <button class="btn block" data-act="edit">Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}`);
   bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/c/edit-profile');
 }

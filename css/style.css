@@ -96,3 +96,10 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}table.t td,table.t th
 input[type=range]{width:100%;accent-color:var(--g)}
 [hidden]{display:none!important}
 .chat h1{font-size:18px}.chat .row.sp{margin:0 0 4px}
+/* Яндекс Карты: тёмная подложка под стиль приложения (метки и подписи не инвертируются) */
+.ymap{background:var(--card2)}
+.ymap [class*="ground-pane"]{filter:invert(.92) hue-rotate(180deg) saturate(.6) brightness(.95)}
+.ymap [class*="copyrights-pane"]{opacity:.6}
+/* подсказки адресов (Геосаджест) */
+[class*="suggest-popup"]{background:var(--card2)!important;border:1px solid var(--line)!important;border-radius:12px!important;color:var(--txt)!important;z-index:1000!important;overflow:hidden}
+[class*="suggest-item"]{color:var(--txt)!important}[class*="suggest-item_selected"]{background:rgba(57,255,106,.14)!important}

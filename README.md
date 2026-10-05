@@ -4,6 +4,7 @@ Telegram Mini App для поиска краткосрочных смен и и�
 
 - **Прод:** один VPS (Timeweb Cloud, Ubuntu): `server/` — Node.js (мини-апп + API + Telegram-бот) и PostgreSQL. Установка — [deploy/setup.sh](deploy/setup.sh), см. ниже.
 - Локально без сервера: `python3 -m http.server 8765` → http://localhost:8765 (данные в localStorage). Каждая вкладка = отдельный пользователь; Telegram ID 1 = админ.
+- Карты — Яндекс Карты (JS API 2.1, [js/maps.js](js/maps.js)). Проверка адресов при создании смены идёт через геокодер Яндекса и требует ключа `YANDEX_MAPS_KEY` в [js/config.js](js/config.js) (кабинет https://developer.tech.yandex.ru, «JavaScript API и HTTP Геокодер»; ограничить по HTTP Referer `speedhelper.ru`). Подсказки адресов при вводе — необязательный ключ `YANDEX_SUGGEST_KEY` («API Геосаджеста»).
 - Архитектура: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). `legacy/` — прежний прототип v5.8.
 
 ## Развёртывание на VPS

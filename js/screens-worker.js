@@ -1,9 +1,10 @@
 // Экраны исполнителя
-import { api, track, MODE, devUsers, setDevUser } from './api.js';
+import { api, track, MODE, devUsers, setDevUser, tg } from './api.js';
 import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, pickLocation, setRole, refreshMe } from './ui.js';
-import { esc, dateLabel, money, kmLabel, plural } from './util.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe } from './ui.js';
+import { createMap, placemark, pinPreset, pickLocation, routeLink } from './maps.js';
+import { esc, dateLabel, money, kmLabel, plural, phone10, fmtPhone } from './util.js';
 import { reportSheet, shiftName } from './screens-common.js';
 
 const FKEY = 'sh_filters_v1';
@@ -47,20 +48,30 @@ async function search(ctx) {
 
   const draw = () => {
     const body = document.getElementById('body'); if (!body) return;
-    if (map) { map.remove(); map = null; }
+    if (map) { map.destroy(); map = null; }
     if (mode === 'swipe') return drawDeck(body);
     if (!queue.length) { body.innerHTML = empty(); return; }
     if (mode === 'list') { body.innerHTML = queue.map((s) => `<div class="card click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>`).join('') + (next !== null ? '<button class="btn block" data-act="more">Показать ещё</button>' : ''); return; }
     body.innerHTML = '<div id="map" style="height:62vh;border-radius:18px;overflow:hidden"></div>';
-    map = L.map('map').setView([F.lat, F.lng], F.radius_km > 60 ? 8 : 10);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
-    L.circle([F.lat, F.lng], { radius: F.radius_km * 1000, color: '#39ff6a', weight: 1, fillOpacity: 0.04 }).addTo(map);
-    queue.filter((s) => s.lat != null).forEach((s) => L.marker([s.lat, s.lng]).addTo(map).on('click', () => {
-      const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${money(s.pay)}</span><span class="mut sm">${kmLabel(s.distance_km)}</span></div><h3>${esc(s.title)}</h3><p class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
-      sh.el.querySelector('[data-o]').onclick = () => { sh.close(); go('#/w/shift/' + s.id); };
-    }));
-    setTimeout(() => map && map.invalidateSize(), 200);
+    drawMap(document.getElementById('map')).catch((e) => { const el = document.getElementById('map'); if (el) el.outerHTML = `<p class="mut">${esc(e.message)}</p>`; });
   };
+
+  async function drawMap(el) {
+    const m = await createMap(el, { center: [F.lat, F.lng], zoom: F.radius_km > 60 ? 8 : F.radius_km > 20 ? 10 : 11 });
+    if (!m) return; if (map) map.destroy(); map = m;
+    const ym = window.ymaps;
+    map.geoObjects.add(new ym.Circle([[F.lat, F.lng], F.radius_km * 1000], {}, { fillColor: '#39ff6a12', strokeColor: '#1fd150', strokeWidth: 2, interactivityModel: 'default#transparent' }));
+    const cl = new ym.Clusterer({ preset: 'islands#invertedGreenClusterIcons', groupByCoordinates: false });
+    cl.add(queue.filter((s) => s.lat != null).map((s) => {
+      const p = new ym.Placemark([s.lat, s.lng], { iconCaption: money(s.pay) }, { preset: pinPreset });
+      p.events.add('click', () => {
+        const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${money(s.pay)}</span><span class="mut sm">${kmLabel(s.distance_km)}</span></div><h3>${esc(s.title)}</h3><p class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
+        sh.el.querySelector('[data-o]').onclick = () => { sh.close(); go('#/w/shift/' + s.id); };
+      });
+      return p;
+    }));
+    map.geoObjects.add(cl);
+  }
 
   function drawDeck(body) {
     if (!queue.length) { body.innerHTML = empty(); return; }
@@ -128,7 +139,7 @@ async function search(ctx) {
   ctx.acts.mode = async (el) => { mode = el.dataset.m; sessionStorage.setItem('sh_mode', mode); document.querySelectorAll('[data-act=mode]').forEach((c) => c.classList.toggle('on', c.dataset.m === mode)); await fetchMore(true); draw(); };
   ctx.acts.filters = () => filtersSheet(F, async () => { saveF(F); ctx.render(''); search(ctx); });
   ctx.poll = async () => { if (!busy && mode !== 'map' && queue.length < 3 && next === null) { const before = queue.length; await fetchMore(true); if (queue.length !== before && !document.querySelector('.sheet')) draw(); } };
-  ctx.cleanup = () => { if (map) map.remove(); };
+  ctx.cleanup = () => { if (map) map.destroy(); map = null; };
 }
 
 function filtersSheet(F, apply) {
@@ -171,11 +182,24 @@ async function shiftPage(ctx, id) {
   const canApply = !mine && s.status === 'open' && !s.my_status;
   ctx.render(`${pageHead('Смена', '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}<div class="card">${shiftCardBody(s).replace('-webkit-line-clamp:3', '-webkit-line-clamp:99')}</div>
     <div class="card click row" data-act="contractor"><div>${avatar(s.contractor.avatar, s.contractor.name)}</div><div class="grow"><b>${esc(s.contractor.company || s.contractor.name)}</b><div class="sm">${stars(s.contractor.rating, s.contractor.reviews)} · ${s.contractor.shifts_done} смен</div></div>›</div>
-    ${s.lat != null ? '<div id="map" style="height:200px;border-radius:16px;overflow:hidden;margin:10px 0"></div>' : ''}
-    ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button>` : ''}` : ''}
-    ${canApply ? '<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button>' : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
-  if (s.lat != null) { const m = L.map('map', { zoomControl: false }).setView([s.lat, s.lng], 14); L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(m); L.marker([s.lat, s.lng]).addTo(m); ctx.cleanup = () => m.remove(); }
+    ${s.lat != null ? `<div id="map" style="height:200px;border-radius:16px;overflow:hidden;margin:10px 0 4px"></div><a class="g sm" href="${routeLink(s.lat, s.lng)}" target="_blank" rel="noopener" data-act="route">🧭 Маршрут в Яндекс Картах</a>` : ''}
+    ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button><div style="height:8px"></div>` : ''}<button class="btn block" data-act="dm">💬 Написать подрядчику</button>` : ''}
+    ${canApply ? '<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button><div style="height:8px"></div><button class="btn block ghost" data-act="ask">💬 Задать вопрос подрядчику</button>' : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
+  if (s.lat != null) {
+    let m = null; ctx.cleanup = () => m && m.destroy();
+    createMap(document.getElementById('map'), { center: [s.lat, s.lng], zoom: 15, controls: [] })
+      .then((x) => { if (!x) return; m = x; m.behaviors.disable('scrollZoom'); placemark(m, s.lat, s.lng, { hintContent: s.address }); })
+      .catch((e) => { const el = document.getElementById('map'); if (el) el.outerHTML = `<p class="mut sm">${esc(e.message)}</p>`; });
+  }
+  // в Telegram внешние ссылки открываем через openLink (иначе откроются внутри мини-приложения)
+  ctx.acts.route = (el) => { if (tg) tg.openLink(el.href); else window.open(el.href, '_blank'); };
   ctx.acts.apply = async () => { const r = await api.apply(id); toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('application_sent', { id }); shiftPage(ctx, id); };
+  ctx.acts.dm = () => go('#/chat/' + s.my_application_id);
+  // личный чат привязан к отклику: чтобы задать вопрос, откликаемся (отклик можно отозвать в «Моих сменах»)
+  ctx.acts.ask = async () => {
+    if (!(await confirmBox('Чтобы написать подрядчику, нужно откликнуться на смену', { ok: 'Откликнуться и написать', sub: 'Отклик можно отозвать в разделе «Мои смены».' }))) return;
+    const r = await api.apply(id); track('application_sent', { id, via: 'ask' }); go('#/chat/' + r.id);
+  };
   ctx.acts.contractor = () => go('#/w/contractor/' + s.contractor.id);
   ctx.acts.team = () => go('#/team/' + id);
   ctx.acts.rep = () => reportSheet('shift', id);
@@ -191,7 +215,7 @@ async function mine(ctx) {
     const cur = TABS.find((t) => t[0] === tab); const list = data.filter((a) => cur[2].includes(a.status));
     const html = `<h1>Мои смены</h1><div class="tabsx">${TABS.map(([k, t, st]) => { const n = data.filter((a) => st.includes(a.status)).length; return `<span class="chip ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t}${n ? ` · ${n}` : ''}</span>`; }).join('')}</div>` +
       (list.length ? list.map((a) => `<div class="card click" data-act="open" data-id="${a.shift.id}" data-st="${a.status}"><div class="row sp"><b>${esc(a.shift.title)}</b>${statusTag(a.status)}</div><div class="mut sm">${esc(dateLabel(a.shift.date))} · ${esc(a.shift.start)}–${esc(a.shift.end)} · ${money(a.shift.pay)}</div><div class="sm">${esc(a.shift.contractor.company || a.shift.contractor.name)}</div>
-        ${a.status === 'accepted' ? `<div class="row gap" style="margin-top:8px"><button class="btn pri sm grow" data-act="team" data-id="${a.shift.id}">Команда и чат</button><button class="btn danger sm" data-act="leave" data-app="${a.id}">Отказаться</button></div>` : ''}
+        ${a.status === 'accepted' ? `<div class="row gap" style="margin-top:8px"><button class="btn pri sm grow" data-act="team" data-id="${a.shift.id}">Команда</button><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button><button class="btn danger sm" data-act="leave" data-app="${a.id}">Отказаться</button></div>` : ''}
         ${a.status === 'pending' ? `<div class="row gap" style="margin-top:8px"><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button><button class="btn danger sm" data-act="leave" data-app="${a.id}">Отозвать</button></div>` : ''}
         ${a.status === 'completed' ? `<button class="btn sm block" data-act="rate" data-id="${a.shift.id}" style="margin-top:8px">Оценить подрядчика</button>` : ''}</div>`).join('') : emptyState(tab === 'pending' ? 'Откликов в ожидании нет' : 'Здесь пока пусто'));
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
@@ -231,7 +255,7 @@ export function profileBlock(w, own) {
   const rows = [['Возраст', w.age && `${w.age}`], ['Город', w.city], ['Опыт', w.experience], ['Навыки', (w.skills || []).length && w.skills.join(', ')], ['Права', (w.license || []).length && 'Категории ' + w.license.join(', ')],
     ['Медкнижка', w.medbook && 'Есть'], ['Самозанятость', w.selfemployed && 'Да'], ['Ночные смены', w.night && 'Готов'], ['Инструмент', w.tools && 'Умеет работать']].filter(([, v]) => v);
   return `<div class="card row">${avatar(w.avatar, w.name, 'lg')}<div class="grow"><h1 style="margin:0">${esc(w.name)}</h1><div>${stars(w.rating, w.reviews)}</div><div class="mut sm">${w.shifts_done} завершённых смен</div>${verifiedTag(w.verified, 'Проверенный исполнитель')}</div></div>
-    ${w.about ? `<p>${esc(w.about)}</p>` : ''}${rows.length ? `<div class="card">${rows.map(([k, v]) => `<div class="row sp sm" style="margin:6px 0"><span class="mut">${k}</span><span style="text-align:right">${esc(v)}</span></div>`).join('')}</div>` : ''}${w.phone ? `<div class="card row sp"><span class="mut">Телефон</span><a class="g" href="tel:${esc(w.phone)}">${esc(w.phone)}</a></div>` : ''}`;
+    ${w.about ? `<p>${esc(w.about)}</p>` : ''}${rows.length ? `<div class="card">${rows.map(([k, v]) => `<div class="row sp sm" style="margin:6px 0"><span class="mut">${k}</span><span style="text-align:right">${esc(v)}</span></div>`).join('')}</div>` : ''}${phone10(w.phone) ? `<div class="card row sp"><span class="mut">Телефон</span><a class="g" href="tel:+7${phone10(w.phone)}">${esc(fmtPhone(w.phone))}</a></div>` : ''}`;
 }
 async function profile(ctx) {
   const u = await refreshMe(); const w = u.worker;

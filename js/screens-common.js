@@ -1,6 +1,6 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone } from './ui.js';
 import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural } from './util.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
@@ -58,14 +58,16 @@ async function workerForm(ctx) {
     <label class="f">Опыт работы</label><input class="i" id="experience" value="${esc(w.experience || '')}" placeholder="Например: 2 года на складе">
     <label class="f">Навыки (через запятую)</label><input class="i" id="skills" value="${esc((w.skills || []).join(', '))}" placeholder="погрузка, монтаж, уборка">
     <label class="f">Водительские права</label><div class="row wrap gap" id="lic">${LICENSES.map((l) => `<span class="chip ${li.has(l) ? 'on' : ''}" data-act="lic" data-l="${l}">${l}</span>`).join('')}</div>
-    <label class="f">Телефон</label><input class="i" id="phone" type="tel" value="${esc(w.phone || '')}" placeholder="+7">
+    <label class="f">Телефон</label>${phoneField('phone', w.phone)}
     ${[['medbook', 'Есть медкнижка'], ['selfemployed', 'Самозанятый'], ['night', 'Готов работать ночью'], ['tools', 'Умею работать с инструментом']].map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(w[k], 'tg', `id="${k}"`)}</div>`).join('')}
     <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`);
   bindPhoto(ctx, box);
+  const phone = maskPhone(document.getElementById('phone'));
   ctx.acts.lic = (el) => { el.classList.toggle('on'); el.classList.contains('on') ? li.add(el.dataset.l) : li.delete(el.dataset.l); };
   ctx.acts.tg = (el) => el.classList.toggle('on');
   ctx.acts.save = async () => {
-    await api.saveWorker({ name: v('name'), city: v('city'), age: v('age'), avatar: box.avatar, about: v('about').trim(), experience: v('experience').trim(), skills: v('skills').split(','), license: [...li], phone: v('phone').trim(),
+    const ph = phone(); if (ph && ph.length < 10) return toast('Номер телефона неполный — 10 цифр после +7', 'err');
+    await api.saveWorker({ name: v('name'), city: v('city'), age: v('age'), avatar: box.avatar, about: v('about').trim(), experience: v('experience').trim(), skills: v('skills').split(','), license: [...li], phone: ph ? '+7' + ph : '',
       medbook: sw('medbook'), selfemployed: sw('selfemployed'), night: sw('night'), tools: sw('tools') });
     await refreshMe(); setRole('worker'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'worker' });
     go(editing ? '#/w/profile' : '#/w/search');
@@ -81,12 +83,14 @@ async function contractorForm(ctx) {
     <label class="f">Имя *</label><input class="i" id="name" value="${esc(c.name || S.user.first_name || '')}">
     <label class="f">Название компании</label><input class="i" id="company" value="${esc(c.company || '')}" placeholder="Необязательно">
     <label class="f">Город *</label><input class="i" id="city" value="${esc(c.city || 'Москва')}">
-    <label class="f">Телефон *</label><div class="row gap"><span class="chip" style="cursor:default">+7</span><input class="i" id="phone" type="tel" inputmode="numeric" maxlength="14" value="${esc(c.phone || '')}" placeholder="9XX XXX XX XX"></div>
+    <label class="f">Телефон *</label>${phoneField('phone', c.phone)}
     <label class="f">Кратко о себе</label><textarea class="i" id="about" placeholder="Необязательно">${esc(c.about || '')}</textarea>
     <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`);
   bindPhoto(ctx, box);
+  const phone = maskPhone(document.getElementById('phone'));
   ctx.acts.save = async () => {
-    await api.saveContractor({ name: v('name'), company: v('company').trim(), city: v('city'), phone: v('phone'), about: v('about').trim(), avatar: box.avatar });
+    if (phone().length < 10) return toast('Укажите телефон полностью — 10 цифр после +7', 'err');
+    await api.saveContractor({ name: v('name'), company: v('company').trim(), city: v('city'), phone: phone(), about: v('about').trim(), avatar: box.avatar });
     await refreshMe(); setRole('contractor'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'contractor' });
     go(editing ? '#/c/profile' : '#/c/home');
   };
@@ -106,7 +110,7 @@ async function chats(ctx) {
     const [dms, teams] = await Promise.all([api.myDialogs(), S.role === 'contractor' ? api.myShifts() : api.myTeams()]);
     const teamList = (S.role === 'contractor' ? teams.filter((s) => s.accepted_count > 0 && s.status !== 'cancelled') : teams);
     const html = `<h1>Чаты</h1><h2>Команды смен</h2>${teamList.length ? teamList.map((s) => `<div class="card click row" data-act="team" data-id="${s.id}"><div class="grow"><b>${esc(shiftName(s))}</b><div class="mut sm">${s.accepted_count} / ${s.people} чел.</div></div>›</div>`).join('') : '<p class="mut">Команда появится после принятия отклика.</p>'}
-      <h2>Личные</h2>${dms.length ? dms.map((d) => `<div class="card click row" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="grow"><b>${esc(d.info.title)}</b><div class="mut sm">${esc(d.info.shift.title)}</div><div class="sm" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.last.text)}</div></div><span class="mut sm">${hhmm(d.last.at)}</span></div>`).join('') : '<p class="mut">Личных переписок пока нет.</p>'}`;
+      <h2>Личные</h2>${dms.length ? dms.map((d) => `<div class="card click row" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="grow"><b>${esc(d.info.title)}</b><div class="mut sm">${esc(d.info.shift.title)}</div><div class="sm ${d.last ? '' : 'mut'}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.last ? esc(d.last.text) : 'Нет сообщений — напишите первым'}</div></div><span class="mut sm">${d.last ? hhmm(d.last.at) : ''}</span></div>`).join('') : `<p class="mut">${S.role === 'contractor' ? 'Здесь появятся чаты с исполнителями, которые откликнулись на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.'}</p>`}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
   ctx.main.dataset.h = ''; await render(); ctx.poll = render;
@@ -159,9 +163,11 @@ async function dmChat(ctx, appId) {
   const isC = S.role === 'contractor' && info.can_manage;
   const st = info.application.status;
   const top = `<div class="card" style="margin:0 12px 6px;flex:none"><div class="row sp"><div class="grow"><b>${esc(info.shift.title)}</b><div class="mut sm">${esc(dateLabel(info.shift.date))} · ${esc(info.shift.start)}–${esc(info.shift.end)} · ${info.shift.pay} ₽</div></div>${statusTag(st)}</div>
-    ${isC && st === 'pending' ? '<div class="row gap" style="margin-top:10px"><button class="btn danger sm grow" data-act="rej">Отклонить</button><button class="btn pri sm grow" data-act="acc">Принять</button></div>' : ''}</div>`;
+    ${isC && st === 'pending' ? '<div class="row gap" style="margin-top:10px"><button class="btn danger sm grow" data-act="rej">Отклонить</button><button class="btn pri sm grow" data-act="acc">Принять</button></div>' : ''}
+    ${st === 'accepted' ? '<a class="g sm" href="#" data-act="team" style="display:inline-block;margin-top:8px">Общий чат команды смены ›</a>' : ''}</div>`;
   await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title)}</div>`, { extraTop: top });
   const decide = (d, q) => async () => { if (!(await confirmBox(q, { ok: d === 'accepted' ? 'Принять' : 'Отклонить', danger: d === 'rejected' }))) return; await api.decide(appId, d); toast(d === 'accepted' ? 'Исполнитель принят' : 'Отклик отклонён', 'ok'); dmChat(ctx, appId); };
+  ctx.acts.team = () => go('#/team/' + info.shift.id);
   ctx.acts.acc = decide('accepted', 'Принять кандидата в команду смены?');
   ctx.acts.rej = decide('rejected', 'Отклонить отклик?');
 }
