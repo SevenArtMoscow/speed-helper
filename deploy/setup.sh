@@ -20,8 +20,10 @@ fi
 
 echo "==> Пользователь и код"
 id speedhelper >/dev/null 2>&1 || useradd --system --home "$DIR" --shell /usr/sbin/nologin speedhelper
-if [ -d "$DIR/.git" ]; then git -C "$DIR" fetch -q origin "$BRANCH" && git -C "$DIR" reset -q --hard "origin/$BRANCH"
+# папка принадлежит пользователю speedhelper — root-у git без safe.directory откажет («dubious ownership»)
+if [ -d "$DIR/.git" ]; then git -c safe.directory="$DIR" -C "$DIR" fetch -q origin "$BRANCH"; git -c safe.directory="$DIR" -C "$DIR" reset -q --hard "origin/$BRANCH"
 else git clone -q -b "$BRANCH" "$REPO" "$DIR"; fi
+echo "    версия: $(git -c safe.directory="$DIR" -C "$DIR" log --oneline -1)"
 (cd "$DIR/server" && npm ci --omit=dev --silent 2>/dev/null || npm install --omit=dev --silent)
 
 echo "==> База данных"
