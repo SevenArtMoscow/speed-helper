@@ -100,6 +100,9 @@ if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
   certbot --nginx -n --agree-tos --register-unsafely-without-email --redirect -d "$DOMAIN" -d "www.$DOMAIN" \
     || certbot --nginx -n --agree-tos --register-unsafely-without-email --redirect -d "$DOMAIN" \
     || echo "!! Сертификат не выпущен: проверьте A-записи домена и запустите: certbot --nginx -d $DOMAIN"
+else
+  # конфиг nginx выше перезаписан без SSL — подключаем уже выпущенный сертификат обратно
+  certbot install --nginx -n --cert-name "$DOMAIN" --redirect || echo "!! Не удалось подключить сертификат: certbot install --nginx --cert-name $DOMAIN --redirect"
 fi
 
 if grep -q '^TG_BOT_TOKEN=$' "$ENV"; then
