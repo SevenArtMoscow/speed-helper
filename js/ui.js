@@ -41,6 +41,34 @@ export const skeleton = (n = 3) => Array.from({ length: n }, () => '<div class="
 export const emptyState = (title, text = '', btn = '') => `<div class="empty"><h2>${esc(title)}</h2><p>${esc(text)}</p>${btn}</div>`;
 export const toggle = (on, act, data = '') => `<div class="switch ${on ? 'on' : ''}" data-act="${act}" ${data} role="switch" aria-checked="${!!on}"><i></i></div>`;
 
+// ---------- проверка форм: пропущенные поля подсвечиваются красным с подсказкой ----------
+// Блок поля — само поле или его обёртка (.row с кнопкой, ряд чипов); подсказка ставится сразу после блока.
+const fieldBox = (el) => (el.closest('[data-field]') || (el.parentElement && el.parentElement.classList.contains('row') && el.tagName !== 'DIV' ? el.parentElement : el));
+export function clearError(el) {
+  const box = fieldBox(el); box.classList.remove('bad');
+  if (box.nextElementSibling && box.nextElementSibling.classList.contains('ferr')) box.nextElementSibling.remove();
+}
+export function markError(el, msg) {
+  clearError(el); const box = fieldBox(el); box.classList.add('bad');
+  const e = document.createElement('div'); e.className = 'ferr'; e.textContent = msg; box.after(e);
+  // подсветка снимается, как только поле начали исправлять
+  const off = () => { clearError(el); el.removeEventListener('input', off); el.removeEventListener('change', off); el.removeEventListener('click', off); };
+  el.addEventListener('input', off); el.addEventListener('change', off); if (el.tagName === 'DIV') el.addEventListener('click', off);
+}
+// звёздочка обязательного поля («Имя *») — красная
+export const reqMark = (html) => html.replace(/ \*<\/label>/g, ' <span class="req">*</span></label>');
+// checks: [[элемент, условие_ок, текст], ...]. Возвращает true, если всё заполнено.
+export function validate(checks) {
+  let first = null;
+  for (const [el, good, msg] of checks) { if (!el) continue; if (good) clearError(el); else { markError(el, msg); first = first || el; } }
+  if (!first) return true;
+  fieldBox(first).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(first.tagName)) setTimeout(() => first.focus({ preventScroll: true }), 300);
+  if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+  toast(checks.filter(([el, g]) => el && !g).length > 1 ? 'Заполните поля, выделенные красным' : checks.find(([el, g]) => el && !g)[2], 'err');
+  return false;
+}
+
 // Маска телефона «+7 (XXX) XXX-XX-XX» на поле ввода. Возвращает () => 10 цифр номера.
 export const phoneField = (id, value) => `<input class="i" id="${id}" type="tel" inputmode="tel" autocomplete="tel" maxlength="18" value="${esc(fmtPhone(value))}" placeholder="+7 (___) ___-__-__">`;
 export function maskPhone(el) {

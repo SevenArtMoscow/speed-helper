@@ -23,6 +23,8 @@ const ADMINS = (env.ADMIN_TG_IDS || '').split(',').map((s) => s.trim()).filter(B
 
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.PG_POOL_MAX || 10) });
 pool.on('error', (e) => console.error('pg idle client error', e.message)); // обрыв соединения не роняет сервер
+// «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера
+pool.on('connect', (c) => c.query(`set timezone to '${(env.TZ_DB || 'Europe/Moscow').replace(/'/g, '')}'`).catch(() => {}));
 
 // ---------- Telegram initData ----------
 function verifyInitData(initData, botToken) {

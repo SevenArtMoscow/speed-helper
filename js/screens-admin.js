@@ -1,6 +1,6 @@
 // Админ-панель владельцев (доступ только при users.is_admin = true; проверяется и на сервере)
 import { api } from './api.js';
-import { S, go, toast, confirmBox, sheet, pageHead, statusTag } from './ui.js';
+import { S, go, toast, errMsg, confirmBox, sheet, pageHead, statusTag, validate } from './ui.js';
 import { esc, dateLabel, money, timeAgo } from './util.js';
 
 const TABS = [['stats', 'Показатели'], ['users', 'Пользователи'], ['shifts', 'Смены'], ['reports', 'Жалобы'], ['cats', 'Категории'], ['audit', 'Журнал']];
@@ -16,8 +16,8 @@ async function admin(ctx, tab = 'stats') {
   }
   if (tab === 'users') {
     const l = await api.adminUsers();
-    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
-      <div class="row gap">${u.roles.includes('contractor') ? `<button class="btn sm" data-act="ver" data-id="${u.id}">✓ Проверенный</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
+    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
+      <div class="row gap">${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
   }
   if (tab === 'shifts') {
     const l = await api.adminShifts();
@@ -35,20 +35,24 @@ async function admin(ctx, tab = 'stats') {
   }
   if (tab === 'audit') {
     const l = await api.adminAudit();
-    body = `<table class="t">${l.map((a) => `<tr><td>${timeAgo(a.at)}</td><td>user ${a.actor}</td><td>${esc(a.action)}</td><td class="mut">${esc(JSON.stringify(a.meta))}</td></tr>`).join('')}</table>`;
+    body = `<table class="t">${l.map((a) => `<tr><td>${timeAgo(a.at)}</td><td>${esc(a.actor_name || 'user ' + a.actor)}</td><td>${esc(a.action)}</td><td class="mut">${esc(JSON.stringify(a.meta))}</td></tr>`).join('')}</table>`;
   }
   ctx.render(nav + body);
   const re = () => admin(ctx, tab);
   const run = (fn) => async (el) => { await fn(el); re(); };
   ctx.acts.t = (el) => admin(ctx, el.dataset.t);
   ctx.acts.block = async (el) => { const b = el.dataset.b === '1'; if (b && !(await confirmBox('Заблокировать аккаунт?', { danger: true, ok: 'Заблокировать' }))) return; await api.adminBlock(Number(el.dataset.id), b); toast('Готово', 'ok'); re(); };
-  ctx.acts.ver = run(async (el) => { await api.adminVerify(Number(el.dataset.id), true); toast('Статус «Проверенный подрядчик» выдан', 'ok'); });
-  ctx.acts.hide = run(async (el) => { await api.adminHideShift(Number(el.dataset.id), el.dataset.h === '1'); });
-  ctx.acts.rep = run(async (el) => { await api.adminResolveReport(Number(el.dataset.id), el.dataset.s); });
-  ctx.acts.catact = run(async (el) => { await api.adminSaveCategory({ id: Number(el.dataset.id), name: el.dataset.n, active: el.dataset.a === '1' }); });
+  ctx.acts.ver = run(async (el) => { const v = el.dataset.v === '1'; await api.adminVerify(Number(el.dataset.id), v); toast(v ? 'Статус «Проверенный подрядчик» выдан' : 'Статус «Проверенный» снят', 'ok'); });
+  ctx.acts.hide = run(async (el) => { const h = el.dataset.h === '1'; await api.adminHideShift(Number(el.dataset.id), h); toast(h ? 'Объявление скрыто' : 'Объявление снова видно', 'ok'); });
+  ctx.acts.rep = run(async (el) => { await api.adminResolveReport(Number(el.dataset.id), el.dataset.s); toast('Статус жалобы обновлён', 'ok'); });
+  ctx.acts.catact = run(async (el) => { await api.adminSaveCategory({ id: Number(el.dataset.id), name: el.dataset.n, active: el.dataset.a === '1' }); S.cats = await api.categories(); toast(el.dataset.a === '1' ? 'Категория снова доступна' : 'Категория скрыта', 'ok'); });
   ctx.acts.cat = (el) => {
     const s = sheet(`<h3>${el.dataset.id ? 'Изменить' : 'Новая'} категория</h3><input class="i" id="n" value="${esc(el.dataset.n || '')}"><button class="btn pri block" style="margin-top:12px" id="ok">Сохранить</button>`);
-    s.el.querySelector('#ok').onclick = async () => { await api.adminSaveCategory({ id: el.dataset.id ? Number(el.dataset.id) : null, name: s.el.querySelector('#n').value, active: true }); s.close(); S.cats = await api.categories(); re(); };
+    s.el.querySelector('#ok').onclick = async () => {
+      const n = s.el.querySelector('#n'); if (!validate([[n, n.value.trim().length >= 2, 'Введите название категории']])) return;
+      try { await api.adminSaveCategory({ id: el.dataset.id ? Number(el.dataset.id) : null, name: n.value.trim(), active: true }); } catch (e) { return toast(errMsg(e), 'err'); }
+      s.close(); S.cats = await api.categories(); toast('Категория сохранена', 'ok'); re();
+    };
   };
 }
 

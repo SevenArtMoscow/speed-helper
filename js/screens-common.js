@@ -1,7 +1,7 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone } from './ui.js';
-import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural } from './util.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
+import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money } from './util.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
 export const shiftName = (s) => `${s.title} · ${dateLabel(s.date)}`;
@@ -9,6 +9,8 @@ export const shiftName = (s) => `${s.title} · ${dateLabel(s.date)}`;
 export function reportSheet(target_type, target_id) {
   const s = sheet(`<h3>Пожаловаться</h3><label class="f">Что не так?</label><textarea class="i" id="rr" placeholder="Опишите причину"></textarea><button class="btn pri block" id="rs" style="margin-top:12px">Отправить жалобу</button>`);
   s.el.querySelector('#rs').onclick = async (e) => {
+    const rr = s.el.querySelector('#rr');
+    if (!validate([[rr, rr.value.trim().length >= 3, 'Опишите причину — хотя бы пару слов']])) return;
     e.target.disabled = true;
     try { await api.report({ target_type, target_id, reason: s.el.querySelector('#rr').value }); s.close(); toast('Жалоба отправлена', 'ok'); }
     catch (err) { toast(errMsg(err), 'err'); e.target.disabled = false; }
@@ -24,24 +26,26 @@ async function welcome(ctx) {
     <div style="height:24px"></div>
     <button class="btn pri block" data-act="worker" style="padding:16px">Найти смену</button>
     <div style="height:10px"></div>
-    <button class="btn block" data-act="contractor" style="padding:16px">Я подрядчик</button></div>`);
+    <button class="btn block" data-act="contractor" style="padding:16px">Я подрядчик</button>
+    ${S.user.is_admin ? '<div style="height:10px"></div><button class="btn block ghost" data-act="admin">Админ-панель</button>' : ''}</div>`);
+  ctx.acts.admin = () => go('#/admin');
   ctx.acts.worker = () => { setRole('worker'); track('role_selected', { role: 'worker' }); go(S.user.roles.includes('worker') ? '#/w/search' : '#/w/onboard'); };
   ctx.acts.contractor = () => { setRole('contractor'); track('role_selected', { role: 'contractor' }); go(S.user.roles.includes('contractor') ? '#/c/home' : '#/c/onboard'); };
 }
 
 // ---------- анкеты ----------
 function photoField(cur) {
-  return `<div class="row" style="margin:8px 0"><div id="pv">${avatar(cur, '', 'lg')}</div><div><button class="btn sm" data-act="photo" type="button">Загрузить фото</button><input type="file" id="pf" accept="image/*" hidden><p class="mut sm" style="margin:6px 0 0">Обязательно</p></div></div>`;
+  return `<div class="row" id="photo" data-field style="margin:8px 0"><div id="pv">${avatar(cur, '', 'lg')}</div><div><button class="btn sm" data-act="photo" type="button">Загрузить фото</button><input type="file" id="pf" accept="image/*" hidden><p class="mut sm" style="margin:6px 0 0">Обязательно</p></div></div>`;
 }
 function bindPhoto(ctx, box) {
   box.avatar = box.avatar || null;
   ctx.acts.photo = () => document.getElementById('pf').click();
   document.getElementById('pf').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    box.avatar = await resizeImage(f); document.getElementById('pv').innerHTML = avatar(box.avatar, '', 'lg');
+    try { box.avatar = await resizeImage(f); } catch { return toast('Не удалось открыть фото. Выберите другое (JPG или PNG)', 'err'); }
+    document.getElementById('pv').innerHTML = avatar(box.avatar, '', 'lg'); clearError(document.getElementById('photo'));
   };
-}
-const v = (id) => (document.getElementById(id) || {}).value;
+}const v = (id) => (document.getElementById(id) || {}).value;
 const sw = (id) => document.getElementById(id).classList.contains('on');
 
 async function workerForm(ctx) {
@@ -49,7 +53,7 @@ async function workerForm(ctx) {
   const editing = S.user.roles.includes('worker');
   const box = { avatar: w.avatar || null };
   const li = new Set(w.license || []);
-  ctx.render(`${editing ? pageHead('Мой профиль') : `<h1>Расскажите о себе</h1><p class="mut">Это увидят подрядчики. Остальное можно заполнить позже.</p>`}
+  ctx.render(reqMark(`${editing ? pageHead('Мой профиль') : `${pageHead('Расскажите о себе')}<p class="mut">Это увидят подрядчики. Остальное можно заполнить позже.</p>`}
     ${photoField(w.avatar)}
     <label class="f">Имя *</label><input class="i" id="name" value="${esc(w.name || S.user.first_name || '')}" maxlength="60">
     <div class="grid2"><div><label class="f">Город *</label><input class="i" id="city" value="${esc(w.city || 'Москва')}"></div><div><label class="f">Возраст *</label><input class="i" id="age" type="number" inputmode="numeric" min="16" max="90" value="${esc(w.age || '')}"></div></div>
@@ -60,13 +64,20 @@ async function workerForm(ctx) {
     <label class="f">Водительские права</label><div class="row wrap gap" id="lic">${LICENSES.map((l) => `<span class="chip ${li.has(l) ? 'on' : ''}" data-act="lic" data-l="${l}">${l}</span>`).join('')}</div>
     <label class="f">Телефон</label>${phoneField('phone', w.phone)}
     ${[['medbook', 'Есть медкнижка'], ['selfemployed', 'Самозанятый'], ['night', 'Готов работать ночью'], ['tools', 'Умею работать с инструментом']].map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(w[k], 'tg', `id="${k}"`)}</div>`).join('')}
-    <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`);
+    <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`));
   bindPhoto(ctx, box);
   const phone = maskPhone(document.getElementById('phone'));
   ctx.acts.lic = (el) => { el.classList.toggle('on'); el.classList.contains('on') ? li.add(el.dataset.l) : li.delete(el.dataset.l); };
   ctx.acts.tg = (el) => el.classList.toggle('on');
   ctx.acts.save = async () => {
-    const ph = phone(); if (ph && ph.length < 10) return toast('Номер телефона неполный — 10 цифр после +7', 'err');
+    const $ = (id) => document.getElementById(id), age = Number(v('age')), ph = phone();
+    if (!validate([
+      [$('photo'), !!box.avatar, 'Добавьте фото — без него подрядчики не видят, кто откликнулся'],
+      [$('name'), v('name').trim().length >= 2, 'Укажите имя'],
+      [$('city'), v('city').trim().length > 0, 'Укажите город'],
+      [$('age'), Number.isInteger(age) && age >= 16 && age <= 90, 'Возраст от 16 до 90 лет'],
+      [$('phone'), !ph || ph.length === 10, 'Номер неполный — нужно 10 цифр после +7'],
+    ])) return;
     await api.saveWorker({ name: v('name'), city: v('city'), age: v('age'), avatar: box.avatar, about: v('about').trim(), experience: v('experience').trim(), skills: v('skills').split(','), license: [...li], phone: ph ? '+7' + ph : '',
       medbook: sw('medbook'), selfemployed: sw('selfemployed'), night: sw('night'), tools: sw('tools') });
     await refreshMe(); setRole('worker'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'worker' });
@@ -78,18 +89,23 @@ async function contractorForm(ctx) {
   const c = S.user.contractor || {};
   const editing = S.user.roles.includes('contractor');
   const box = { avatar: c.avatar || null };
-  ctx.render(`${editing ? pageHead('Профиль подрядчика') : `<h1>Профиль подрядчика</h1><p class="mut">Исполнители увидят это в ваших сменах.</p>`}
+  ctx.render(reqMark(`${editing ? pageHead('Профиль подрядчика') : `${pageHead('Профиль подрядчика')}<p class="mut">Исполнители увидят это в ваших сменах.</p>`}
     ${photoField(c.avatar).replace('Обязательно', 'Необязательно')}
     <label class="f">Имя *</label><input class="i" id="name" value="${esc(c.name || S.user.first_name || '')}">
     <label class="f">Название компании</label><input class="i" id="company" value="${esc(c.company || '')}" placeholder="Необязательно">
     <label class="f">Город *</label><input class="i" id="city" value="${esc(c.city || 'Москва')}">
     <label class="f">Телефон *</label>${phoneField('phone', c.phone)}
     <label class="f">Кратко о себе</label><textarea class="i" id="about" placeholder="Необязательно">${esc(c.about || '')}</textarea>
-    <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`);
+    <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`));
   bindPhoto(ctx, box);
   const phone = maskPhone(document.getElementById('phone'));
   ctx.acts.save = async () => {
-    if (phone().length < 10) return toast('Укажите телефон полностью — 10 цифр после +7', 'err');
+    const $ = (id) => document.getElementById(id);
+    if (!validate([
+      [$('name'), v('name').trim().length >= 2, 'Укажите имя'],
+      [$('city'), v('city').trim().length > 0, 'Укажите город'],
+      [$('phone'), phone().length === 10, phone() ? 'Номер неполный — нужно 10 цифр после +7' : 'Укажите телефон — по нему с вами свяжутся исполнители'],
+    ])) return;
     await api.saveContractor({ name: v('name'), company: v('company').trim(), city: v('city'), phone: phone(), about: v('about').trim(), avatar: box.avatar });
     await refreshMe(); setRole('contractor'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'contractor' });
     go(editing ? '#/c/profile' : '#/c/home');
@@ -170,7 +186,7 @@ async function dmChat(ctx, appId) {
   const info = await api.dmInfo(appId);
   const isC = S.role === 'contractor' && info.can_manage;
   const st = info.application.status;
-  const top = `<div class="card" style="margin:0 12px 6px;flex:none"><div class="row sp"><div class="grow"><b>${esc(info.shift.title)}</b><div class="mut sm">${esc(dateLabel(info.shift.date))} · ${esc(info.shift.start)}–${esc(info.shift.end)} · ${info.shift.pay} ₽</div></div>${statusTag(st)}</div>
+  const top = `<div class="card" style="margin:0 12px 6px;flex:none"><div class="row sp"><div class="grow"><b>${esc(info.shift.title)}</b><div class="mut sm">${esc(dateLabel(info.shift.date))} · ${esc(info.shift.start)}–${esc(info.shift.end)} · ${money(info.shift.pay)}</div></div>${statusTag(st)}</div>
     ${isC && st === 'pending' ? '<div class="row gap" style="margin-top:10px"><button class="btn danger sm grow" data-act="rej">Отклонить</button><button class="btn pri sm grow" data-act="acc">Принять</button></div>' : ''}
     ${st === 'accepted' ? '<a class="g sm" href="#" data-act="team" style="display:inline-block;margin-top:8px">Общий чат команды смены ›</a>' : ''}</div>`;
   await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title)}</div>`, { extraTop: top });
@@ -199,7 +215,7 @@ function membersSheet(T, sid, can, isOwner, ctx) {
       ${m.role !== 'owner' && m.user_id !== me && (can('attendance') || can('remove') || isOwner) ? `<button class="btn sm" data-m="${m.user_id}">⋯</button>` : ''}</div>`).join('')}
     ${isOwner && s.status !== 'completed' && s.status !== 'cancelled' ? '<button class="btn pri block" data-fin style="margin-top:12px">Смена завершена</button>' : ''}`);
   sh.el.onclick = async (e) => {
-    if (e.target.closest('[data-fin]')) { sh.close(); return finishShift(sid, () => go('#/c/shift/' + sid)); }
+    if (e.target.closest('[data-fin]')) { sh.close(); return finishShift(sid).catch((er) => toast(errMsg(er), 'err')); }
     const b = e.target.closest('[data-m]'); if (!b) return;
     const uidv = Number(b.dataset.m), m = T.members.find((x) => x.user_id === uidv); sh.close();
     const a = sheet(`<h3>${esc(m.name)}</h3>${can('attendance') ? '<div class="row gap"><button class="btn grow" data-a="here">✓ Пришёл</button><button class="btn grow" data-a="miss">✗ Не пришёл</button></div><div style="height:8px"></div>' : ''}
@@ -236,11 +252,12 @@ async function review(ctx, sid) {
   if (!list.length) { ctx.render(`${pageHead('Оценка')}${emptyState('Все оценки выставлены', 'Спасибо!', `<button class="btn pri" data-act="home">Готово</button>`)}`); ctx.acts.home = () => go('#/'); return; }
   const CR = { contractor: ['Условия', 'Соответствие описанию', 'Организация', 'Своевременность оплаты'], worker: ['Пунктуальность', 'Качество работы', 'Ответственность'] };
   ctx.render(`${pageHead('Оцените ' + (list[0].to_role === 'contractor' ? 'подрядчика' : 'исполнителей'))}<p class="mut sm">${esc(shiftName(list[0].shift))}</p>${list.map((p, i) => `<div class="card" data-i="${i}"><div class="row">${avatar(p.to_avatar, p.to_name)}<b>${esc(p.to_name)}</b></div>
-    <div class="stars" data-main style="margin:10px 0"></div>${CR[p.to_role].map((c, j) => `<div class="row sp sm"><span>${c}</span><span class="stars" data-c="${j}" style="font-size:20px;letter-spacing:2px"></span></div>`).join('')}
+    <div class="stars" data-main data-field style="margin:10px 0"></div>${CR[p.to_role].map((c, j) => `<div class="row sp sm"><span>${c}</span><span class="stars" data-c="${j}" style="font-size:20px;letter-spacing:2px"></span></div>`).join('')}
     <textarea class="i" placeholder="Комментарий (необязательно)" style="margin-top:10px;min-height:56px"></textarea><button class="btn pri block" style="margin-top:10px" data-act="send" data-i="${i}">Отправить</button></div>`).join('')}`);
   const getters = list.map((p, i) => { const card = ctx.main.querySelector(`.card[data-i="${i}"]`); return { main: mountStars(card.querySelector('[data-main]')), cr: [...card.querySelectorAll('[data-c]')].map((e) => mountStars(e)), card }; });
   ctx.acts.send = async (el) => {
     const i = Number(el.dataset.i), p = list[i], g = getters[i], stars = g.main();
+    if (!validate([[g.card.querySelector('[data-main]'), stars > 0, 'Поставьте оценку — от 1 до 5 звёзд']])) return;
     const criteria = {}; CR[p.to_role].forEach((c, j) => { const x = g.cr[j](); if (x) criteria[c] = x; });
     await api.submitReview({ shift_id: sid, to_user: p.to_user, stars, criteria, text: g.card.querySelector('textarea').value });
     g.card.innerHTML = '<p class="g">✓ Оценка отправлена</p>'; track('review_sent');

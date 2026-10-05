@@ -26,25 +26,25 @@ async function search(ctx) {
   if (needProfile()) return go('#/w/onboard');
   const F = loadF();
   let mode = sessionStorage.getItem('sh_mode') || 'swipe';
-  let queue = [], next = 0, total = 0, hist = null, loading = false, busy = false, map = null;
+  let queue = [], next = 0, total = 0, hist = null, loading = false, busy = false, map = null, withSkipped = false;
 
   const fetchMore = async (reset) => {
     if (loading) return; loading = true;
     try {
       if (reset) { queue = []; next = 0; }
       if (next === null) return;
-      const r = await api.feed({ ...F, offset: next, limit: mode === 'map' ? 200 : 20 });
+      const r = await api.feed({ ...F, include_skipped: withSkipped, offset: next, limit: mode === 'map' ? 200 : 20 });
       const have = new Set(queue.map((x) => x.id)); queue.push(...r.items.filter((x) => !have.has(x.id))); next = r.next; total = r.total;
     } finally { loading = false; }
   };
   const summary = () => {
     const d = { any: 'Все даты', today: 'Сегодня', tomorrow: 'Завтра', weekend: 'Выходные' }[F.date];
-    return `${d} · от ${F.min_pay} ₽ · ${F.radius_km} км`;
+    return `${d} · от ${money(F.min_pay)} · ${F.radius_km} км`;
   };
   const frame = () => `<div class="row sp" style="margin:2px 0 6px"><div class="tabsx" style="margin:0">${[['swipe', 'Карточки'], ['list', 'Список'], ['map', 'Карта']].map(([k, t]) => `<span class="chip ${mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${t}</span>`).join('')}</div><button class="btn sm" data-act="filters">⚙ Фильтры</button></div><div class="mut sm" style="margin-bottom:4px">${summary()}</div><div id="body"></div>`;
 
   const empty = () => `<div class="empty"><h2>Пока новых смен нет.</h2><p>Попробуйте расширить поиск.</p>
-    <div class="row wrap gap" style="justify-content:center"><button class="btn pri" data-act="similar">Показать похожие смены</button><button class="btn" data-act="filters">Изменить фильтры</button><button class="btn" data-act="refresh">Обновить поиск</button>${hist ? '<button class="btn" data-act="undo">↺ Вернуть последнюю</button>' : ''}</div></div>`;
+    <div class="row wrap gap" style="justify-content:center"><button class="btn pri" data-act="similar">Показать похожие смены</button><button class="btn" data-act="filters">Изменить фильтры</button><button class="btn" data-act="refresh">Обновить поиск</button>${withSkipped ? '' : '<button class="btn" data-act="skipped">Показать пропущенные</button>'}${hist ? '<button class="btn" data-act="undo">↺ Вернуть последнюю</button>' : ''}</div></div>`;
 
   const draw = () => {
     const body = document.getElementById('body'); if (!body) return;
@@ -124,7 +124,9 @@ async function search(ctx) {
   };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.more = async () => { await fetchMore(); draw(); };
-  ctx.acts.refresh = async () => { hist = null; await fetchMore(true); draw(); };
+  ctx.acts.refresh = async () => { hist = null; await fetchMore(true); draw(); if (!queue.length) toast('Новых смен пока нет'); };
+  // пропущенные смены снова в ленте (до перехода на другой экран)
+  ctx.acts.skipped = async () => { withSkipped = true; await fetchMore(true); draw(); toast(queue.length ? 'Показываем и пропущенные смены' : 'Пропущенных смен нет'); };
   ctx.acts.similar = async () => {
     const base = hist && hist.s; if (!base) { F.radius_km = Math.max(F.radius_km, 100); F.date = 'any'; F.min_pay = 0; saveF(F); toast('Расширили поиск'); await fetchMore(true); return draw(); }
     const r = await api.feed({ ...F, date: 'any', min_pay: 0, radius_km: 150, similar_to: base.id, include_skipped: true }); queue = r.items; next = r.next; draw();
@@ -139,14 +141,14 @@ async function search(ctx) {
 function filtersSheet(F, apply) {
   const s = sheet(`<h3>Фильтры</h3>
     <label class="f">Когда</label><div class="row wrap gap" id="fd">${[['today', 'Сегодня'], ['tomorrow', 'Завтра'], ['weekend', 'Выходные'], ['any', 'Все смены']].map(([k, t]) => `<span class="chip ${F.date === k ? 'on' : ''}" data-d="${k}">${t}</span>`).join('')}</div>
-    <label class="f">Минимальная оплата: <b id="pv">от ${F.min_pay} ₽</b></label><input type="range" id="pr" min="0" max="15000" step="50" value="${F.min_pay}"><div class="row gap"><input class="i" id="pn" type="number" inputmode="numeric" value="${F.min_pay}" placeholder="Своя сумма"><span class="mut sm" style="white-space:nowrap">до 15 000 ₽+</span></div>
+    <label class="f">Минимальная оплата: <b id="pv">от ${money(F.min_pay)}</b></label><input type="range" id="pr" min="0" max="15000" step="50" value="${F.min_pay}"><div class="row gap"><input class="i" id="pn" type="number" inputmode="numeric" value="${F.min_pay}" placeholder="Своя сумма"><span class="mut sm" style="white-space:nowrap">до 15 000 ₽+</span></div>
     <label class="f">Где</label><div class="row wrap gap" id="fg">${[['msk', 'Москва'], ['mo', 'Московская область'], ['near', 'Рядом со мной'], ['pick', 'На карте']].map(([k, t]) => `<span class="chip ${F.geo === k ? 'on' : ''}" data-g="${k}">${t}</span>`).join('')}</div>
     <label class="f">Радиус: <b id="rv">${F.radius_km} км</b></label><input type="range" id="rr" min="1" max="150" value="${F.radius_km}">
     <label class="f">Какую работу ищете?</label><div class="row wrap gap" id="fc">${S.cats.map((c) => `<span class="chip ${F.categories.includes(c.id) ? 'on' : ''}" data-c="${c.id}">${esc(c.name)}</span>`).join('')}</div>
     <div class="row gap" style="margin-top:18px"><button class="btn ghost grow" id="rs">Сбросить</button><button class="btn pri grow" id="ok">Применить</button></div>`);
   const q = (id) => s.el.querySelector('#' + id);
-  q('pr').oninput = () => { F.min_pay = +q('pr').value; q('pn').value = F.min_pay; q('pv').textContent = `от ${F.min_pay} ₽`; };
-  q('pn').oninput = () => { F.min_pay = Math.max(0, +q('pn').value || 0); q('pr').value = F.min_pay; q('pv').textContent = `от ${F.min_pay} ₽`; };
+  q('pr').oninput = () => { F.min_pay = +q('pr').value; q('pn').value = F.min_pay; q('pv').textContent = `от ${money(F.min_pay)}`; };
+  q('pn').oninput = () => { F.min_pay = Math.max(0, +q('pn').value || 0); q('pr').value = F.min_pay; q('pv').textContent = `от ${money(F.min_pay)}`; };
   q('rr').oninput = () => { F.radius_km = +q('rr').value; q('rv').textContent = F.radius_km + ' км'; };
   s.el.onclick = async (e) => {
     const d = e.target.closest('[data-d]'), g = e.target.closest('[data-g]'), c = e.target.closest('[data-c]');
@@ -175,7 +177,7 @@ async function shiftPage(ctx, id) {
   const mine = s.contractor_id === S.user.id;
   const canApply = !mine && s.status === 'open' && !s.my_status;
   ctx.render(`${pageHead('Смена', '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}<div class="card">${shiftCardBody(s).replace('-webkit-line-clamp:3', '-webkit-line-clamp:99')}</div>
-    <div class="card click row" data-act="contractor"><div>${avatar(s.contractor.avatar, s.contractor.name)}</div><div class="grow"><b>${esc(s.contractor.company || s.contractor.name)}</b><div class="sm">${stars(s.contractor.rating, s.contractor.reviews)} · ${s.contractor.shifts_done} смен</div></div>›</div>
+    <div class="card click row" data-act="contractor"><div>${avatar(s.contractor.avatar, s.contractor.name)}</div><div class="grow"><b>${esc(s.contractor.company || s.contractor.name)}</b><div class="sm">${stars(s.contractor.rating, s.contractor.reviews)} · ${s.contractor.shifts_done} ${plural(s.contractor.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>
     ${s.lat != null ? `<div id="map" style="height:200px;border-radius:16px;overflow:hidden;margin:10px 0 4px"></div><a class="g sm" href="${routeLink(s.lat, s.lng)}" target="_blank" rel="noopener" data-act="route">🧭 Маршрут в Яндекс Картах</a>` : ''}
     ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button><div style="height:8px"></div>` : ''}<button class="btn block" data-act="dm">💬 Написать подрядчику</button>` : ''}
     ${canApply ? '<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button><div style="height:8px"></div><button class="btn block ghost" data-act="ask">💬 Задать вопрос подрядчику</button>' : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
@@ -221,7 +223,11 @@ async function mine(ctx) {
   ctx.acts.team = (el) => go('#/team/' + el.dataset.id);
   ctx.acts.rate = (el) => go('#/review/' + el.dataset.id);
   ctx.acts.dm = (el) => go('#/chat/' + el.dataset.app);
-  ctx.acts.leave = async (el) => { if (!(await confirmBox('Отказаться от смены?', { ok: 'Отказаться', danger: true }))) return; await api.withdraw(Number(el.dataset.app)); toast('Готово', 'ok'); await load(); };
+  ctx.acts.leave = async (el) => {
+    const pending = (el.closest('[data-st]') || {}).dataset?.st === 'pending';
+    if (!(await confirmBox(pending ? 'Отозвать отклик?' : 'Отказаться от смены?', { ok: pending ? 'Отозвать' : 'Отказаться', danger: true, sub: pending ? '' : 'Подрядчик получит уведомление, место освободится для других.' }))) return;
+    await api.withdraw(Number(el.dataset.app)); toast(pending ? 'Отклик отозван' : 'Вы отказались от смены', 'ok'); await load();
+  };
 }
 
 // ---------- избранные подрядчики ----------
@@ -235,11 +241,11 @@ async function fav(ctx) {
 async function contractorPage(ctx, id) {
   id = Number(id);
   const P = await api.contractorPage(id), c = P.contractor;
-  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep">⚑</button>')}<div class="card row">${avatar(c.avatar, c.name, 'lg')}<div class="grow"><b>${esc(c.name)}</b>${c.company ? `<div class="mut sm">${esc(c.company)}</div>` : ''}<div>${stars(c.rating, c.reviews)}</div><div class="mut sm">${c.shifts_done} проведённых смен</div>${verifiedTag(c.verified, 'Проверенный подрядчик')}</div></div>
+  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep">⚑</button>')}<div class="card row">${avatar(c.avatar, c.name, 'lg')}<div class="grow"><b>${esc(c.name)}</b>${c.company ? `<div class="mut sm">${esc(c.company)}</div>` : ''}<div>${stars(c.rating, c.reviews)}</div><div class="mut sm">${c.shifts_done} ${plural(c.shifts_done, 'проведённая смена', 'проведённые смены', 'проведённых смен')}</div>${verifiedTag(c.verified, 'Проверенный подрядчик')}</div></div>
     ${c.about ? `<p>${esc(c.about)}</p>` : ''}<button class="btn block ${P.is_fav ? '' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
     <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click" data-act="open" data-id="${s.id}"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))} · ${money(s.pay)}</div></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
     ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card"><div class="star">${'★'.repeat(r.stars)}</div>${r.text ? `<div>${esc(r.text)}</div>` : ''}<div class="mut sm">${esc(r.from_name || '')}</div></div>`).join('')}` : ''}`);
-  ctx.acts.fav = async () => { await api.toggleFav(id); contractorPage(ctx, id); };
+  ctx.acts.fav = async () => { const on = await api.toggleFav(id); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); contractorPage(ctx, id); };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.rep = () => reportSheet('contractor', id);
 }
@@ -248,7 +254,7 @@ async function contractorPage(ctx, id) {
 export function profileBlock(w, own) {
   const rows = [['Возраст', w.age && `${w.age}`], ['Город', w.city], ['Опыт', w.experience], ['Навыки', (w.skills || []).length && w.skills.join(', ')], ['Права', (w.license || []).length && 'Категории ' + w.license.join(', ')],
     ['Медкнижка', w.medbook && 'Есть'], ['Самозанятость', w.selfemployed && 'Да'], ['Ночные смены', w.night && 'Готов'], ['Инструмент', w.tools && 'Умеет работать']].filter(([, v]) => v);
-  return `<div class="card row">${avatar(w.avatar, w.name, 'lg')}<div class="grow"><h1 style="margin:0">${esc(w.name)}</h1><div>${stars(w.rating, w.reviews)}</div><div class="mut sm">${w.shifts_done} завершённых смен</div>${verifiedTag(w.verified, 'Проверенный исполнитель')}</div></div>
+  return `<div class="card row">${avatar(w.avatar, w.name, 'lg')}<div class="grow"><h1 style="margin:0">${esc(w.name)}</h1><div>${stars(w.rating, w.reviews)}</div><div class="mut sm">${w.shifts_done} ${plural(w.shifts_done, 'завершённая смена', 'завершённые смены', 'завершённых смен')}</div>${verifiedTag(w.verified, 'Проверенный исполнитель')}</div></div>
     ${w.about ? `<p>${esc(w.about)}</p>` : ''}${rows.length ? `<div class="card">${rows.map(([k, v]) => `<div class="row sp sm" style="margin:6px 0"><span class="mut">${k}</span><span style="text-align:right">${esc(v)}</span></div>`).join('')}</div>` : ''}${phone10(w.phone) ? `<div class="card row sp"><span class="mut">Телефон</span><a class="g" href="tel:+7${phone10(w.phone)}">${esc(fmtPhone(w.phone))}</a></div>` : ''}`;
 }
 async function profile(ctx) {
