@@ -26,14 +26,14 @@ async function search(ctx) {
   if (needProfile()) return go('#/w/onboard');
   const F = loadF();
   let mode = sessionStorage.getItem('sh_mode') || 'swipe';
-  let queue = [], next = 0, total = 0, hist = null, loading = false, busy = false, map = null, withSkipped = false;
+  let queue = [], next = 0, total = 0, hist = null, loading = false, busy = false, map = null;
 
   const fetchMore = async (reset) => {
     if (loading) return; loading = true;
     try {
       if (reset) { queue = []; next = 0; }
       if (next === null) return;
-      const r = await api.feed({ ...F, include_skipped: withSkipped, offset: next, limit: mode === 'map' ? 200 : 20 });
+      const r = await api.feed({ ...F, offset: next, limit: mode === 'map' ? 200 : 20 });
       const have = new Set(queue.map((x) => x.id)); queue.push(...r.items.filter((x) => !have.has(x.id))); next = r.next; total = r.total;
     } finally { loading = false; }
   };
@@ -41,10 +41,14 @@ async function search(ctx) {
     const d = { any: 'Все даты', today: 'Сегодня', tomorrow: 'Завтра', weekend: 'Выходные' }[F.date];
     return `${d} · от ${money(F.min_pay)} · ${F.radius_km} км`;
   };
-  const frame = () => `<div class="row sp" style="margin:2px 0 6px"><div class="tabsx" style="margin:0">${[['swipe', 'Карточки'], ['list', 'Список'], ['map', 'Карта']].map(([k, t]) => `<span class="chip ${mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${t}</span>`).join('')}</div><button class="btn sm" data-act="filters">⚙ Фильтры</button></div><div class="mut sm" style="margin-bottom:4px">${summary()}</div><div id="body"></div>`;
+  const frame = () => `<div class="row sp" style="margin:2px 0 6px"><div class="tabsx" style="margin:0">${[['swipe', 'Карточки'], ['list', 'Список'], ['map', 'Карта']].map(([k, t]) => `<span class="chip ${mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${t}</span>`).join('')}</div><button class="btn sm" data-act="filters">⚙ Фильтры</button></div><div class="row sp" style="margin-bottom:4px"><span class="mut sm">${summary()}</span><a class="g sm" href="#" data-act="skippedList" id="skn" hidden>↺ Пропущенные</a></div><div id="body"></div>`;
+  // ссылка на пропущенные смены (с количеством) — видна, если есть что вернуть
+  let skipCount = 0;
+  const showSkips = (n) => { skipCount = Math.max(0, n); const a = document.getElementById('skn'); if (a) { a.hidden = !skipCount; a.textContent = `↺ Пропущенные · ${skipCount}`; } };
+  const loadSkips = () => api.mySkips().then((l) => showSkips(l.length)).catch(() => {});
 
   const empty = () => `<div class="empty"><h2>Пока новых смен нет.</h2><p>Попробуйте расширить поиск.</p>
-    <div class="row wrap gap" style="justify-content:center"><button class="btn pri" data-act="similar">Показать похожие смены</button><button class="btn" data-act="filters">Изменить фильтры</button><button class="btn" data-act="refresh">Обновить поиск</button>${withSkipped ? '' : '<button class="btn" data-act="skipped">Показать пропущенные</button>'}${hist ? '<button class="btn" data-act="undo">↺ Вернуть последнюю</button>' : ''}</div></div>`;
+    <div class="row wrap gap" style="justify-content:center"><button class="btn pri" data-act="similar">Показать похожие смены</button><button class="btn" data-act="filters">Изменить фильтры</button><button class="btn" data-act="refresh">Обновить поиск</button>${skipCount ? `<button class="btn" data-act="skippedList">↺ Пропущенные · ${skipCount}</button>` : ''}${hist ? '<button class="btn" data-act="undo">↺ Вернуть последнюю</button>' : ''}</div></div>`;
 
   const draw = () => {
     const body = document.getElementById('body'); if (!body) return;
@@ -101,7 +105,7 @@ async function search(ctx) {
     queue.shift();
     try {
       if (kind === 'like') { const r = await api.apply(s.id); hist = { kind, s, dup: !!r.duplicate }; toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('swipe_right', { id: s.id }); track('application_sent', { id: s.id }); }
-      else { await api.skip(s.id); hist = { kind, s }; track('swipe_left', { id: s.id }); }
+      else { await api.skip(s.id); hist = { kind, s }; showSkips(skipCount + 1); track('swipe_left', { id: s.id }); }
     } catch (e) {
       queue.unshift(s); toast(errMsg(e), 'err');
       if (e.code === 'closed') queue.shift();
@@ -111,22 +115,21 @@ async function search(ctx) {
 
   ctx.render(frame());
   document.getElementById('body').innerHTML = '<div class="skel" style="height:50vh"></div>';
-  await fetchMore(true); draw();
+  await fetchMore(true); draw(); loadSkips().then(() => !queue.length && draw());
 
   ctx.acts.like = () => decide('like'); ctx.acts.skip = () => decide('skip');
   ctx.acts.undo = async () => {
     if (!hist || busy) return;
     try {
       if (hist.kind === 'like') { if (!(await api.undoApply(hist.s.id))) { hist = null; draw(); return toast('Отклик уже обработан — вернуть нельзя', 'err'); } }
-      else await api.unskip(hist.s.id);
+      else { await api.unskip(hist.s.id); showSkips(skipCount - 1); }
       queue.unshift(hist.s); hist = null; draw();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.more = async () => { await fetchMore(); draw(); };
   ctx.acts.refresh = async () => { hist = null; await fetchMore(true); draw(); if (!queue.length) toast('Новых смен пока нет'); };
-  // пропущенные смены снова в ленте (до перехода на другой экран)
-  ctx.acts.skipped = async () => { withSkipped = true; await fetchMore(true); draw(); toast(queue.length ? 'Показываем и пропущенные смены' : 'Пропущенных смен нет'); };
+  ctx.acts.skippedList = () => go('#/w/skipped');
   ctx.acts.similar = async () => {
     const base = hist && hist.s; if (!base) { F.radius_km = Math.max(F.radius_km, 100); F.date = 'any'; F.min_pay = 0; saveF(F); toast('Расширили поиск'); await fetchMore(true); return draw(); }
     const r = await api.feed({ ...F, date: 'any', min_pay: 0, radius_km: 150, similar_to: base.id, include_skipped: true }); queue = r.items; next = r.next; draw();
@@ -167,6 +170,39 @@ function filtersSheet(F, apply) {
     }
     if (e.target.id === 'rs') { Object.assign(F, defFilters()); s.close(); apply(); }
     if (e.target.id === 'ok') { s.close(); apply(); }
+  };
+}
+
+// ---------- пропущенные смены (свайп влево): поиск, вернуть в ленту, откликнуться ----------
+async function skippedPage(ctx) {
+  if (needProfile()) return go('#/w/onboard');
+  let list = await api.mySkips(), q = '';
+  const match = (s) => !q || [s.title, s.address, s.category_name, s.contractor?.company, s.contractor?.name, s.description].join(' ').toLowerCase().includes(q);
+  const draw = () => {
+    const l = list.filter(match);
+    document.getElementById('skl').innerHTML = !list.length ? emptyState('Пропущенных смен нет', 'Здесь появятся смены, которые вы смахнули влево.', '<button class="btn pri" data-act="toSearch">К поиску смен</button>')
+      : !l.length ? emptyState('Ничего не нашлось', 'Попробуйте другое слово.')
+      : l.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>
+        <div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="back2" data-id="${s.id}">↺ Вернуть в ленту</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('');
+    const all = document.getElementById('skall'); if (all) all.hidden = list.length < 2;
+  };
+  ctx.render(`${pageHead('Пропущенные', '<button class="btn sm" data-act="all" id="skall" hidden>Вернуть все</button>')}
+    <p class="mut sm" style="margin-top:0">Смены, которые вы смахнули влево. Верните их в ленту или откликнитесь сразу.</p>
+    <input class="i" id="skq" type="search" placeholder="🔍 Поиск: название, адрес, подрядчик" autocomplete="off"><div id="skl"></div>`);
+  draw();
+  document.getElementById('skq').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
+  const drop = (id) => { list = list.filter((s) => s.id !== id); draw(); };
+  ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
+  ctx.acts.toSearch = () => go('#/w/search');
+  ctx.acts.back2 = async (el) => { const id = Number(el.dataset.id); await api.unskip(id); drop(id); toast('Смена вернулась в ленту', 'ok'); };
+  ctx.acts.apply = async (el) => {
+    const id = Number(el.dataset.id);
+    try { const r = await api.apply(id); drop(id); toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('application_sent', { id, via: 'skipped' }); }
+    catch (e) { if (e.code === 'closed') drop(id); throw e; }
+  };
+  ctx.acts.all = async () => {
+    if (!(await confirmBox(`Вернуть в ленту все пропущенные смены (${list.length})?`, { ok: 'Вернуть все' }))) return;
+    await api.unskipAll(); list = []; draw(); toast('Все смены вернулись в ленту', 'ok');
   };
 }
 
@@ -286,5 +322,5 @@ export function bindCommonProfile(ctx, u) {
 }
 
 export const workerRoutes = [
-  [/^#\/w\/search$/, search], [/^#\/w\/shift\/(\d+)$/, shiftPage], [/^#\/w\/mine$/, mine], [/^#\/w\/fav$/, fav], [/^#\/w\/contractor\/(\d+)$/, contractorPage], [/^#\/w\/profile$/, profile],
+  [/^#\/w\/search$/, search], [/^#\/w\/skipped$/, skippedPage],[/^#\/w\/shift\/(\d+)$/, shiftPage], [/^#\/w\/mine$/, mine], [/^#\/w\/fav$/, fav], [/^#\/w\/contractor\/(\d+)$/, contractorPage], [/^#\/w\/profile$/, profile],
 ];

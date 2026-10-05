@@ -5,6 +5,18 @@ import { api } from './api.js';
 export const S = { user: null, role: null, cats: [], route: '' };
 
 export const BOLT = '<svg viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+// Линейные иконки 24×24 (цвет — currentColor): нижнее меню и шапка
+const svg = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+export const ICON = {
+  search: svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/><path class="f" d="M11.6 7.6 9.4 11h2.4l-.6 3.4 2.4-3.6h-2.3z"/>'),
+  mine: svg('<rect x="5" y="4.5" width="14" height="16.5" rx="2.5"/><path d="M9 4.5V3.5h6v1"/><path d="m9 13 2.2 2.2L15.5 11"/>'),
+  chats: svg('<path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L4 19.8l1.2-4.4A8 8 0 1 1 20.5 11.5z"/><path d="M8.5 11.5h.01M12.5 11.5h.01M16.5 11.5h.01" stroke-width="2.6"/>'),
+  fav: svg('<path d="m12 3.3 2.7 5.5 6 .9-4.35 4.25 1.03 6L12 17.1l-5.38 2.85 1.03-6L3.3 9.7l6-.9z"/>'),
+  profile: svg('<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c.6-3.9 3.7-6.3 7.5-6.3s6.9 2.4 7.5 6.3"/>'),
+  home: svg('<path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v11h4.5v-6h4v6h4.5V9"/>'),
+  shifts: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h3M8 17h6"/>'),
+  bell: svg('<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.8 1.8H4.2z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
+};
 export const logo = () => `<div class="logo">${BOLT}<span>SPEED HELPER</span></div>`;
 export const go = (hash) => { if (location.hash === hash) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = hash; };
 export const back = () => { if (history.length > 1) history.back(); else go(S.role === 'contractor' ? '#/c/home' : '#/w/search'); };

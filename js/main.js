@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession } from './api.js';
-import { S, logo, go, back, toast, errMsg, skeleton, setBell } from './ui.js';
+import { S, logo, go, back, toast, errMsg, skeleton, setBell, ICON } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
@@ -14,13 +14,13 @@ const ctx = { main: null, acts: {}, poll: null, cleanup: null,
 export { ctx };
 
 const TABS = {
-  worker: [['#/w/search', '🔍', 'Поиск'], ['#/w/mine', '📋', 'Мои смены'], ['#/chats', '💬', 'Чаты'], ['#/w/fav', '⭐', 'Избранное'], ['#/w/profile', '👤', 'Профиль']],
-  contractor: [['#/c/home', '🏠', 'Главная'], ['#/c/shifts', '📋', 'Смены'], ['#/chats', '💬', 'Чаты'], ['#/c/fav', '⭐', 'Избранное'], ['#/c/profile', '👤', 'Профиль']],
+  worker: [['#/w/search', 'search', 'Поиск'], ['#/w/mine', 'mine', 'Мои смены'], ['#/chats', 'chats', 'Чаты'], ['#/w/fav', 'fav', 'Избранное'], ['#/w/profile', 'profile', 'Профиль']],
+  contractor: [['#/c/home', 'home', 'Главная'], ['#/c/shifts', 'shifts', 'Смены'], ['#/chats', 'chats', 'Чаты'], ['#/c/fav', 'fav', 'Избранное'], ['#/c/profile', 'profile', 'Профиль']],
 };
 
 function shell() {
   app.innerHTML = `${MODE === 'local' ? '<div class="banner">Локальный режим: данные хранятся только в этом браузере</div>' : ''}
-    <div class="top">${logo()}<div class="sp"></div><button class="iconbtn" data-act="bell" aria-label="Уведомления">🔔<span class="badge" id="bell" hidden></span></button></div>
+    <div class="top">${logo()}<div class="sp"></div><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
     <main id="main"></main><nav class="tabs" id="tabs" hidden></nav>`;
   ctx.main = $('#main');
   app.addEventListener('click', async (e) => {
@@ -40,7 +40,7 @@ export function renderTabs(hash) {
   if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash.includes('onboard')) { t.hidden = true; return; }
   t.hidden = false;
   const unread = S.user ? S.user.unread : 0;
-  t.innerHTML = tabs.map(([h, ic, l]) => `<a href="${h}" class="${hash.startsWith(h) || (h === '#/w/search' && hash.startsWith('#/w/shift')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) ? 'on' : ''}"><span class="ic">${ic}</span>${l}</a>`).join('');
+  t.innerHTML = tabs.map(([h, ic, l]) => `<a href="${h}" class="${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
 }
 
 let navToken = 0;

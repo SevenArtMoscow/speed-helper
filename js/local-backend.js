@@ -151,6 +151,13 @@ const API = {
   getShift(me, sid) { actor(me); return shiftView(shiftOr404(sid), me, null); },
   skip(me, sid) { actor(me); if (!db.skips.find((s) => s.user_id === me && s.shift_id === sid)) db.skips.push({ user_id: me, shift_id: sid, at: now() }); return true; },
   unskip(me, sid) { actor(me); db.skips = db.skips.filter((s) => !(s.user_id === me && s.shift_id === sid)); return true; },
+  mySkips(me) {
+    actor(me); const t = todayISO();
+    return db.skips.filter((k) => k.user_id === me).sort((a, b) => b.at - a.at).map((k) => ({ k, s: db.shifts.find((x) => x.id === k.shift_id) }))
+      .filter(({ s }) => s && s.status === 'open' && !s.hidden && s.date >= t && !db.applications.some((a) => a.shift_id === s.id && a.worker_id === me))
+      .map(({ k, s }) => ({ ...shiftView(s, me, null), skipped_at: k.at }));
+  },
+  unskipAll(me) { actor(me); const n = db.skips.filter((s) => s.user_id === me).length; db.skips = db.skips.filter((s) => s.user_id !== me); return n; },
 
   // ----- отклик (идемпотентен: unique(shift, worker)) -----
   apply(me, sid) {

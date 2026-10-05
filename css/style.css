@@ -16,9 +16,15 @@ h1{font-size:24px;margin:8px 0 4px}h2{font-size:18px;margin:18px 0 8px}h3{font-s
 .mut{color:var(--mut)}.sm{font-size:13px}.g{color:var(--g)}.r{color:var(--red)}.y{color:var(--yel)}
 nav.tabs{flex:none;display:flex;height:calc(var(--nav) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--bg2);border-top:1px solid var(--line)}
 nav.tabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--mut);text-decoration:none;font-size:11px;position:relative}
-nav.tabs a .ic{font-size:21px;line-height:1}
+nav.tabs a .ic{display:grid;place-items:center;width:46px;height:30px;border-radius:15px;transition:background .2s,transform .15s}
+nav.tabs a .ic svg{width:23px;height:23px;transition:filter .2s}
+nav.tabs a .ic svg .f{fill:currentColor;stroke:none}
+nav.tabs a:active .ic{transform:scale(.9)}
+nav.tabs a.on .ic{background:rgba(57,255,106,.13)}
+nav.tabs a.on .ic svg{filter:drop-shadow(0 0 5px rgba(57,255,106,.65))}
+nav.tabs a.on{font-weight:600}
 nav.tabs a.on{color:var(--g)}
-nav.tabs a .badge{top:6px;right:calc(50% - 22px)}
+nav.tabs a .badge{top:4px;right:calc(50% - 24px)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:14px;padding:13px 18px;font-weight:700;cursor:pointer;background:var(--card2);color:var(--txt);transition:transform .08s,opacity .15s,box-shadow .15s}
 .btn:active{transform:scale(.97)}
 .btn.pri{background:var(--g);color:#031407;box-shadow:0 0 18px rgba(57,255,106,.25)}
@@ -117,3 +123,5 @@ input[type=range]{width:100%;accent-color:var(--g)}
 .row.bad,[data-field].bad{border:1px solid var(--red);padding:6px;border-radius:14px}
 .ferr{color:var(--red);font-size:12px;margin:5px 2px 0;animation:fade .15s}
 .req{color:var(--red)}
+.bellbtn{display:grid;place-items:center}.bellbtn svg{width:23px;height:23px;color:var(--txt)}
+.bellbtn:has(.badge:not([hidden])) svg{color:var(--g);filter:drop-shadow(0 0 5px rgba(57,255,106,.6))}

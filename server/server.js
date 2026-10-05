@@ -21,10 +21,9 @@ for (const k of ['DATABASE_URL', 'TG_BOT_TOKEN', 'JWT_SECRET']) if (!env[k]) { c
 const PORT = Number(env.PORT || 3000);
 const ADMINS = (env.ADMIN_TG_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
 
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.PG_POOL_MAX || 10) });
+// «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера (параметр соединения)
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.PG_POOL_MAX || 10), options: `-c timezone=${(env.TZ_DB || 'Europe/Moscow').replace(/[^\w/+-]/g, '')}` });
 pool.on('error', (e) => console.error('pg idle client error', e.message)); // обрыв соединения не роняет сервер
-// «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера
-pool.on('connect', (c) => c.query(`set timezone to '${(env.TZ_DB || 'Europe/Moscow').replace(/'/g, '')}'`).catch(() => {}));
 
 // ---------- Telegram initData ----------
 function verifyInitData(initData, botToken) {
