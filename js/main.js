@@ -80,7 +80,9 @@ async function boot() {
   if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#0b0c0e'); tg.setBackgroundColor('#0b0c0e'); } catch {} }
   const fit = () => { app.style.height = (window.visualViewport ? window.visualViewport.height : innerHeight) + 'px'; };
   fit(); window.visualViewport && window.visualViewport.addEventListener('resize', fit); addEventListener('resize', fit);
-  window.addEventListener('error', (e) => api.logError({ message: e.message, src: e.filename, line: e.lineno, screen: location.hash }).catch(() => {}));
+  const ua = navigator.userAgent.slice(0, 120);
+  window.addEventListener('error', (e) => api.logError({ message: e.message, src: e.filename, line: e.lineno, stack: e.error && String(e.error.stack || '').slice(0, 500), screen: location.hash, ua }).catch(() => {}));
+  window.addEventListener('unhandledrejection', (e) => api.logError({ message: 'unhandled: ' + String((e.reason && e.reason.message) || e.reason).slice(0, 300), stack: e.reason && String(e.reason.stack || '').slice(0, 500), screen: location.hash, ua }).catch(() => {}));
   shell();
   ctx.render(skeleton());
   try {

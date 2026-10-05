@@ -122,7 +122,7 @@ async function chats(ctx) {
 async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}) {
   const me = getSession().me;
   ctx.render(`<div class="chat">${head}${extraTop}<div class="pin" id="pin" hidden></div><div class="msgs" id="msgs"></div>
-    <div class="compose"><input id="ci" placeholder="Сообщение" maxlength="2000" autocomplete="off"><button data-act="send" aria-label="Отправить">➤</button></div></div>`, { full: true });
+    <form class="compose" id="cf" autocomplete="off"><input id="ci" placeholder="Сообщение" maxlength="2000" autocomplete="off" enterkeyhint="send"><button type="submit" id="cs" aria-label="Отправить">➤</button></form></div>`, { full: true });
   const box = document.getElementById('msgs'); let last = 0; const seen = new Set(); const cache = {};
   const add = (list) => {
     const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
@@ -139,12 +139,20 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
   const all = () => Object.values(cache);
   pinBar(all());
   ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (l.length) pinBar(all()); };
-  ctx.acts.send = async () => {
-    const i = document.getElementById('ci'); const text = i.value.trim(); if (!text) return;
-    i.value = ''; i.focus();
-    try { add([await api.sendMessage(scope, text, uid())]); track('message_sent', { scope: scope.split(':')[0] }); } catch (e) { i.value = text; toast(errMsg(e), 'err'); }
+  // Отправка: кнопка, Enter и клавиша «Отправить» на телефоне идут через submit формы.
+  // На телефоне касание кнопки обрабатываем сразу (touchstart) и не даём полю потерять фокус:
+  // иначе первое касание лишь прячет клавиатуру, экран перестраивается и нажатие теряется.
+  const input = document.getElementById('ci'), btn = document.getElementById('cs');
+  const send = async () => {
+    const text = input.value.trim(); if (!text) return;
+    input.value = '';
+    const tmp = document.createElement('div'); tmp.className = 'm me sending'; tmp.innerHTML = `${esc(text)}<div class="t">отправка…</div>`; box.appendChild(tmp); box.scrollTop = box.scrollHeight;
+    try { const m = await api.sendMessage(scope, text, uid()); tmp.remove(); add([m]); track('message_sent', { scope: scope.split(':')[0] }); }
+    catch (e) { tmp.remove(); if (!input.value) input.value = text; toast(errMsg(e), 'err'); }
   };
-  document.getElementById('ci').onkeydown = (e) => e.key === 'Enter' && ctx.acts.send();
+  document.getElementById('cf').onsubmit = (e) => { e.preventDefault(); send(); };
+  btn.addEventListener('touchstart', (e) => { e.preventDefault(); send(); }, { passive: false });
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
   ctx.acts.msg = (el) => {
     const m = cache[el.dataset.id]; const mine = m.user_id === me;
     const s = sheet(`${canPin ? `<button class="btn block" data-a="pin">${m.pinned ? 'Открепить' : 'Закрепить'}</button><div style="height:8px"></div>` : ''}${mine ? '' : '<button class="btn danger block" data-a="rep">Пожаловаться</button>'}`);
