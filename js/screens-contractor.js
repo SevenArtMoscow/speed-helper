@@ -72,7 +72,7 @@ async function createOrEdit(ctx, id) {
     <label class="f">Название смены *</label><input class="i" id="title" value="${esc(d.title || '')}" placeholder="Например: Разгрузка мебели" ${lock}>
     <label class="f">Категория *</label><select class="i" id="cat" ${lock}><option value="">Выберите…</option>${S.cats.map((c) => `<option value="${c.id}" ${d.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
     <label class="f">Описание</label><textarea class="i" id="desc" placeholder="Что нужно делать">${esc(d.description || '')}</textarea>
-    <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Введите адрес с номером дома — мы проверим его по Яндекс Картам'}</div>
+    <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Начните вводить адрес и выберите его из подсказок'}</div>
     <div class="grid2"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
     <div class="grid2"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${esc(d.end || '18:00')}"></div></div>
     <label class="f">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}">
@@ -85,7 +85,7 @@ async function createOrEdit(ctx, id) {
   ctx.acts.req = (el) => { const r = el.dataset.r; reqs.has(r) ? reqs.delete(r) : reqs.add(r); drawReqs(); }; // повторное нажатие отключает тег
   ctx.acts.tg = (el) => el.classList.toggle('on');
   ctx.acts.addreq = () => { const s = sheet('<h3>Своё требование</h3><input class="i" id="nr" maxlength="40"><button class="btn pri block" style="margin-top:12px" id="ok">Добавить</button>'); s.el.querySelector('#ok').onclick = () => { const t = s.el.querySelector('#nr').value.trim(); if (t) { custom.push(t); reqs.add(t); drawReqs(); } s.close(); }; };
-  // ----- адрес: проверка существования через геокодер Яндекса (до номера дома) -----
+  // ----- адрес: проверка существования через DaData (до номера дома) -----
   const addrEl = document.getElementById('addr');
   let geoFor = geo ? addrEl.value : null, checkSeq = 0; // для какого текста адреса найдена точка
   const geoInfo = (t, cls) => { const el = document.getElementById('geo'); if (el) { el.className = 'sm ' + cls; el.textContent = t; } };
@@ -93,18 +93,19 @@ async function createOrEdit(ctx, id) {
   const checkAddr = async () => {
     const q = addrEl.value.trim(), my = ++checkSeq;
     if (geo && q === geoFor) return true;
-    geo = null; if (q.length < 3) { geoInfo('Введите адрес с номером дома — мы проверим его по Яндекс Картам', 'mut'); return false; }
+    geo = null; if (q.length < 3) { geoInfo('Начните вводить адрес и выберите его из подсказок', 'mut'); return false; }
     geoInfo('Проверяем адрес…', 'mut');
     let g; try { g = await geocode(q); } catch (e) { geoInfo('Не удалось проверить адрес: ' + e.message + '. Укажите точку 📍', 'r'); return false; }
     if (my !== checkSeq) return !!geo; // пока проверяли, адрес изменили
     if (!g) { geoInfo('✗ Такой адрес не найден. Проверьте город, улицу и дом или укажите точку 📍', 'r'); return false; }
-    if (!g.ok) { geoInfo(`⚠ Не нашли дом: «${g.address}». Добавьте номер дома или поставьте точку 📍`, 'y'); return false; }
-    setGeo(g, g.address, '✓ Адрес найден на Яндекс Картах'); return true;
+    if (!g.house) { geoInfo(`⚠ Не хватает номера дома: «${g.address}». Выберите дом из подсказок или поставьте точку 📍`, 'y'); return false; }
+    if (!g.ok) { geoInfo(`⚠ Дом найден, но без координат: «${g.address}». Поставьте точку на карте 📍`, 'y'); return false; }
+    setGeo(g, g.address, '✓ Адрес найден'); return true;
   };
   if (!editing) {
-    addrEl.addEventListener('input', () => { if (addrEl.value.trim() !== geoFor) { geo = null; geoInfo('Адрес будет проверен по Яндекс Картам', 'mut'); } });
-    addrEl.addEventListener('change', checkAddr);
-    attachSuggest(addrEl, (text) => { addrEl.value = text; checkAddr(); }).catch(() => {});
+    addrEl.addEventListener('input', () => { if (addrEl.value.trim() !== geoFor) { geo = null; geoInfo('Выберите адрес из подсказок — так мы проверим, что он существует', 'mut'); } });
+    addrEl.addEventListener('change', () => setTimeout(checkAddr, 250)); // даём сработать выбору из подсказок
+    attachSuggest(addrEl, (g) => (g.ok ? setGeo(g, g.address, '✓ Адрес найден') : checkAddr()));
   }
   ctx.acts.pin = async () => {
     const r = await pickLocation({ ...(geo || {}), query: val('addr') });

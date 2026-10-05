@@ -3,7 +3,7 @@ import { api, track, MODE, devUsers, setDevUser, tg } from './api.js';
 import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe } from './ui.js';
-import { createMap, placemark, pinPreset, pickLocation, routeLink } from './maps.js';
+import { createMap, placemark, radiusCircle, shiftsLayer, pickLocation, routeLink } from './maps.js';
 import { esc, dateLabel, money, kmLabel, plural, phone10, fmtPhone } from './util.js';
 import { reportSheet, shiftName } from './screens-common.js';
 
@@ -48,7 +48,7 @@ async function search(ctx) {
 
   const draw = () => {
     const body = document.getElementById('body'); if (!body) return;
-    if (map) { map.destroy(); map = null; }
+    if (map) { map.remove(); map = null; }
     if (mode === 'swipe') return drawDeck(body);
     if (!queue.length) { body.innerHTML = empty(); return; }
     if (mode === 'list') { body.innerHTML = queue.map((s) => `<div class="card click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>`).join('') + (next !== null ? '<button class="btn block" data-act="more">Показать ещё</button>' : ''); return; }
@@ -57,20 +57,14 @@ async function search(ctx) {
   };
 
   async function drawMap(el) {
-    const m = await createMap(el, { center: [F.lat, F.lng], zoom: F.radius_km > 60 ? 8 : F.radius_km > 20 ? 10 : 11 });
-    if (!m) return; if (map) map.destroy(); map = m;
-    const ym = window.ymaps;
-    map.geoObjects.add(new ym.Circle([[F.lat, F.lng], F.radius_km * 1000], {}, { fillColor: '#39ff6a12', strokeColor: '#1fd150', strokeWidth: 2, interactivityModel: 'default#transparent' }));
-    const cl = new ym.Clusterer({ preset: 'islands#invertedGreenClusterIcons', groupByCoordinates: false });
-    cl.add(queue.filter((s) => s.lat != null).map((s) => {
-      const p = new ym.Placemark([s.lat, s.lng], { iconCaption: money(s.pay) }, { preset: pinPreset });
-      p.events.add('click', () => {
-        const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${money(s.pay)}</span><span class="mut sm">${kmLabel(s.distance_km)}</span></div><h3>${esc(s.title)}</h3><p class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
-        sh.el.querySelector('[data-o]').onclick = () => { sh.close(); go('#/w/shift/' + s.id); };
-      });
-      return p;
-    }));
-    map.geoObjects.add(cl);
+    const m = await createMap(el, { center: [F.lat, F.lng], zoom: F.radius_km > 60 ? 7 : F.radius_km > 20 ? 9 : 10.5 });
+    if (!m) return; if (map) map.remove(); map = m;
+    radiusCircle(map, F.lat, F.lng, F.radius_km);
+    shiftsLayer(map, queue, (id) => {
+      const s = queue.find((x) => x.id === id); if (!s) return;
+      const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${money(s.pay)}</span><span class="mut sm">${kmLabel(s.distance_km)}</span></div><h3>${esc(s.title)}</h3><p class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
+      sh.el.querySelector('[data-o]').onclick = () => { sh.close(); go('#/w/shift/' + s.id); };
+    });
   }
 
   function drawDeck(body) {
@@ -139,7 +133,7 @@ async function search(ctx) {
   ctx.acts.mode = async (el) => { mode = el.dataset.m; sessionStorage.setItem('sh_mode', mode); document.querySelectorAll('[data-act=mode]').forEach((c) => c.classList.toggle('on', c.dataset.m === mode)); await fetchMore(true); draw(); };
   ctx.acts.filters = () => filtersSheet(F, async () => { saveF(F); ctx.render(''); search(ctx); });
   ctx.poll = async () => { if (!busy && mode !== 'map' && queue.length < 3 && next === null) { const before = queue.length; await fetchMore(true); if (queue.length !== before && !document.querySelector('.sheet')) draw(); } };
-  ctx.cleanup = () => { if (map) map.destroy(); map = null; };
+  ctx.cleanup = () => { if (map) map.remove(); map = null; };
 }
 
 function filtersSheet(F, apply) {
@@ -186,9 +180,9 @@ async function shiftPage(ctx, id) {
     ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button><div style="height:8px"></div>` : ''}<button class="btn block" data-act="dm">💬 Написать подрядчику</button>` : ''}
     ${canApply ? '<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button><div style="height:8px"></div><button class="btn block ghost" data-act="ask">💬 Задать вопрос подрядчику</button>' : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
   if (s.lat != null) {
-    let m = null; ctx.cleanup = () => m && m.destroy();
-    createMap(document.getElementById('map'), { center: [s.lat, s.lng], zoom: 15, controls: [] })
-      .then((x) => { if (!x) return; m = x; m.behaviors.disable('scrollZoom'); placemark(m, s.lat, s.lng, { hintContent: s.address }); })
+    let m = null; ctx.cleanup = () => m && m.remove();
+    createMap(document.getElementById('map'), { center: [s.lat, s.lng], zoom: 15, geolocate: false })
+      .then((x) => { if (!x) return; m = x; m.scrollZoom.disable(); placemark(m, s.lat, s.lng); })
       .catch((e) => { const el = document.getElementById('map'); if (el) el.outerHTML = `<p class="mut sm">${esc(e.message)}</p>`; });
   }
   // в Telegram внешние ссылки открываем через openLink (иначе откроются внутри мини-приложения)

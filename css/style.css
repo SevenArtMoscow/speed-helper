@@ -96,10 +96,17 @@ table.t{width:100%;border-collapse:collapse;font-size:13px}table.t td,table.t th
 input[type=range]{width:100%;accent-color:var(--g)}
 [hidden]{display:none!important}
 .chat h1{font-size:18px}.chat .row.sp{margin:0 0 4px}
-/* Яндекс Карты: тёмная подложка под стиль приложения (метки и подписи не инвертируются) */
-.ymap{background:var(--card2)}
-.ymap [class*="ground-pane"]{filter:invert(.92) hue-rotate(180deg) saturate(.6) brightness(.95)}
-.ymap [class*="copyrights-pane"]{opacity:.6}
-/* подсказки адресов (Геосаджест) */
-[class*="suggest-popup"]{background:var(--card2)!important;border:1px solid var(--line)!important;border-radius:12px!important;color:var(--txt)!important;z-index:1000!important;overflow:hidden}
-[class*="suggest-item"]{color:var(--txt)!important}[class*="suggest-item_selected"]{background:rgba(57,255,106,.14)!important}
+/* карта (MapLibre + OpenFreeMap) */
+.maplibregl-map{background:#0c0c0c;font:inherit}
+.maplibregl-ctrl-group{background:var(--card2)!important;border:1px solid var(--line)}
+.maplibregl-ctrl-group button+button{border-top-color:var(--line)!important}
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon{filter:invert(1)}
+.maplibregl-ctrl-attrib{background:rgba(11,12,14,.7)!important;color:var(--mut)}.maplibregl-ctrl-attrib a{color:var(--mut)}
+.maplibregl-ctrl-attrib-button{filter:invert(1)}
+.mpin{display:flex;flex-direction:column;align-items:center;cursor:pointer}
+.mpin i{width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--g);border:3px solid #0b0c0e;box-shadow:0 0 12px rgba(57,255,106,.6);margin-bottom:6px}
+.mpin b{order:-1;background:#0b0c0e;color:var(--g);font-size:12px;padding:2px 7px;border-radius:8px;margin-bottom:4px;border:1px solid var(--line)}
+/* подсказки адресов (DaData) */
+.sugg{position:absolute;top:100%;left:0;right:0;z-index:60;margin-top:4px;background:var(--card2);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.sugg .si{padding:10px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--line)}.sugg .si:active,.sugg .si:hover{background:rgba(57,255,106,.12)}
+.sugg .sb{padding:5px 12px;font-size:11px;color:var(--mut);text-align:right}
