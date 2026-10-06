@@ -8,6 +8,29 @@ import { contractorRoutes } from './screens-contractor.js';
 import { adminRoutes } from './screens-admin.js';
 
 const app = document.getElementById('app');
+
+// ---------- заставка ----------
+// Уходит только когда готово: вход выполнен, категории загружены, первый экран отрисован, шрифты и карта подгружены в фоне.
+// Минимум по времени — чтобы успела проиграться анимация (в этой же сессии повторно — короче).
+const splash = (() => {
+  const el = document.getElementById('splash'), bar = document.getElementById('spbar'), hint = document.getElementById('sphint');
+  const seen = (() => { try { return sessionStorage.getItem('sh_splash') === '1'; } catch { return false; } })();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const MIN = reduced ? 500 : seen ? 1300 : 2900; // мс от начала загрузки страницы
+  let gone = false;
+  const slow = setTimeout(() => hint && (hint.hidden = false), 6000);
+  const hard = setTimeout(() => finish(), 20000); // страховка: что бы ни случилось, заставка не вечная
+  function step(p) { if (bar && !gone) bar.style.width = p + '%'; }
+  async function finish() {
+    if (gone || !el) return; gone = true; clearTimeout(slow); clearTimeout(hard);
+    step(100);
+    const wait = MIN - performance.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    el.classList.add('out'); try { sessionStorage.setItem('sh_splash', '1'); } catch {}
+    setTimeout(() => el.remove(), 700);
+  }
+  return { step, finish };
+})();
+splash.step(18);
 const ROUTES = [...commonRoutes, ...workerRoutes, ...contractorRoutes, ...adminRoutes];
 const ctx = { main: null, acts: {}, poll: null, cleanup: null,
   render(html, { full = false } = {}) { this.main.className = full ? 'nopad' : ''; this.main.style.overflow = full ? 'hidden' : ''; this.main.innerHTML = html; } };
@@ -87,12 +110,16 @@ async function boot() {
   window.addEventListener('unhandledrejection', (e) => api.logError({ message: 'unhandled: ' + String((e.reason && e.reason.message) || e.reason).slice(0, 300), stack: e.reason && String(e.reason.stack || '').slice(0, 500), screen: location.hash, ua }).catch(() => {}));
   shell();
   ctx.render(skeleton());
+  splash.step(32);
   try {
     S.user = await login();
+    splash.step(58);
     S.cats = await api.categories();
+    splash.step(76);
     publicConfig().then((c) => (S.cfg = c));
   } catch (e) {
     ctx.render(`<div class="empty"><h2>Не удалось войти</h2><p>${esc(errMsg(e))}</p>${tg ? '' : '<p class="sm">Откройте приложение через Telegram-бота.</p>'}<button class="btn pri" onclick="location.reload()">Повторить</button></div>`);
+    splash.finish();
     return;
   }
   // переход из уведомления бота: ?r=/c/shift/5 → #/c/shift/5
@@ -106,6 +133,10 @@ async function boot() {
   document.addEventListener('visibilitychange', () => !document.hidden && tick());
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
   track('app_open', { v: CONFIG.APP_VERSION });
-  route();
+  await route();
+  splash.step(92);
+  // пока заставка играет: догружаем шрифты и библиотеку карты, чтобы потом открывалось мгновенно
+  await Promise.allSettled([document.fonts ? document.fonts.ready : null, import('./maps.js').then((x) => x.warmMap())]);
+  splash.finish();
 }
 boot();

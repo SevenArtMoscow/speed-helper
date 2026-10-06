@@ -168,3 +168,41 @@ a.g{text-decoration:none;font-weight:600}
 
 .irow.click{cursor:pointer}.irow.click:active{background:rgba(255,255,255,.04)}
 .hero .card{background:var(--card)}
+
+/* ===== заставка при запуске ===== */
+#splash{position:fixed;inset:0;z-index:9999;background:#0b0c0e;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;
+  transition:opacity .5s ease,transform .5s cubic-bezier(.4,0,.2,1),visibility .5s}
+#splash.out{opacity:0;transform:scale(1.08);visibility:hidden;pointer-events:none}
+.sp-glow{position:absolute;left:50%;top:44%;width:150vmax;height:150vmax;transform:translate(-50%,-50%);pointer-events:none;
+  background:radial-gradient(circle,rgba(57,255,106,.17),rgba(57,255,106,.05) 22%,transparent 50%);animation:spGlow 2.6s ease-out both}
+.sp-center{position:relative;display:flex;flex-direction:column;align-items:center;transform:translateY(-4vh)}
+.sp-logo{position:relative;width:120px;height:120px;display:grid;place-items:center}
+.sp-logo svg{width:84px;height:84px;overflow:visible;animation:spGlowSvg .6s .95s ease forwards,spBreath 2.2s 1.6s ease-in-out infinite}
+.sp-bolt{fill:rgba(57,255,106,0);stroke:#39ff6a;stroke-width:.8;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:100;
+  animation:spDraw .95s .1s cubic-bezier(.65,0,.25,1) forwards,spFill .45s .9s ease forwards}
+.sp-ring{position:absolute;inset:6px;border-radius:50%;border:1.5px solid rgba(57,255,106,.55);opacity:0;animation:spRing 1.9s 1s ease-out infinite}
+.sp-ring.r2{animation-delay:1.55s}
+.sp-name{margin-top:26px;font-size:24px;font-weight:800;letter-spacing:.14em;color:#fff;white-space:nowrap;display:flex}
+.sp-name span{display:inline-block;opacity:0;transform:translateY(16px) scale(.9);animation:spLetter .55s calc(.55s + var(--i)*48ms) cubic-bezier(.2,.9,.3,1.25) forwards}
+.sp-sp{width:.38em}
+/* «Rodionov production» — волнистый шрифт: буквы стоят на волне, 1 секунду по ним бежит волна и цветовая вспышка */
+.sp-by{margin-top:16px;font-size:16px;font-weight:600;letter-spacing:.16em;color:#9aa3ae;white-space:nowrap;display:flex;text-transform:none}
+.sp-by span{display:inline-block;opacity:0;transform:translateY(var(--w,0px));
+  animation:spShow .01s calc(1.35s + var(--i)*30ms) forwards,spWave .5s calc(1.35s + var(--i)*30ms) ease-in-out,spColor 1s calc(1.35s + var(--i)*30ms) ease-out}
+.sp-bar{position:absolute;left:50%;bottom:max(40px,calc(24px + env(safe-area-inset-bottom)));width:150px;height:3px;transform:translateX(-50%);border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.sp-bar i{display:block;width:6%;height:100%;border-radius:3px;background:linear-gradient(90deg,#1fd150,#39ff6a);box-shadow:0 0 10px rgba(57,255,106,.7);transition:width .6s cubic-bezier(.2,.8,.2,1)}
+.sp-hint{position:absolute;left:0;right:0;bottom:max(62px,calc(46px + env(safe-area-inset-bottom)));text-align:center;font-size:12px;color:#8b939e}
+@keyframes spDraw{to{stroke-dashoffset:0}}
+@keyframes spFill{to{fill:#39ff6a}}
+@keyframes spGlowSvg{to{filter:drop-shadow(0 0 16px rgba(57,255,106,.85))}}
+@keyframes spBreath{50%{filter:drop-shadow(0 0 26px rgba(57,255,106,1));transform:scale(1.05)}}
+@keyframes spRing{0%{opacity:.75;transform:scale(.72)}100%{opacity:0;transform:scale(1.55)}}
+@keyframes spGlow{from{opacity:0;transform:translate(-50%,-50%) scale(.5)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes spLetter{to{opacity:1;transform:none}}
+@keyframes spShow{to{opacity:1}}
+@keyframes spWave{0%{transform:translateY(var(--w,0px))}38%{transform:translateY(calc(var(--w,0px) - 11px)) scale(1.18)}100%{transform:translateY(var(--w,0px))}}
+@keyframes spColor{0%,100%{color:#9aa3ae}30%{color:#39ff6a;text-shadow:0 0 14px rgba(57,255,106,.8)}}
+@media (prefers-reduced-motion:reduce){
+  #splash *{animation:none!important;transition:none!important}
+  .sp-bolt{stroke-dashoffset:0;fill:#39ff6a}.sp-name span,.sp-by span{opacity:1;transform:translateY(var(--w,0px))}.sp-ring{display:none}
+}

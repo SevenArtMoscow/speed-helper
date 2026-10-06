@@ -26,6 +26,9 @@ function loadMaplibre() {
   return loading;
 }
 
+// Подгрузка библиотеки карты заранее (во время заставки), чтобы карта потом открывалась без задержки
+export const warmMap = () => loadMaplibre().catch(() => {});
+
 // Подписи на карте — по-русски (в стиле по умолчанию «Moskva / Москва»)
 function russianLabels(map) {
   for (const l of map.getStyle().layers) {

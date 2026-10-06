@@ -12,12 +12,25 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>SPEED HELPER</title>
 <link rel="icon" type="image/png" href="icons/favicon-32.png">
-<link rel="stylesheet" href="css/style.css?v=5">
+<link rel="stylesheet" href="css/style.css?v=6">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+<div id="splash" role="status" aria-label="Загрузка SPEED HELPER">
+  <div class="sp-glow"></div>
+  <div class="sp-center">
+    <div class="sp-logo">
+      <span class="sp-ring"></span><span class="sp-ring r2"></span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sp-bolt" pathLength="100" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+    </div>
+    <div class="sp-name" aria-hidden="true"><span style="--i:0">S</span><span style="--i:1">P</span><span style="--i:2">E</span><span style="--i:3">E</span><span style="--i:4">D</span><span class="sp-sp" style="--i:5">&nbsp;</span><span style="--i:6">H</span><span style="--i:7">E</span><span style="--i:8">L</span><span style="--i:9">P</span><span style="--i:10">E</span><span style="--i:11">R</span></div>
+    <div class="sp-by" aria-hidden="true"><span style="--i:0;--w:0.0px">R</span><span style="--i:1;--w:2.0px">o</span><span style="--i:2;--w:3.0px">d</span><span style="--i:3;--w:2.3px">i</span><span style="--i:4;--w:0.4px">o</span><span style="--i:5;--w:-1.7px">n</span><span style="--i:6;--w:-2.9px">o</span><span style="--i:7;--w:-2.6px">v</span><span class="sp-sp" style="--i:8;--w:-0.8px">&nbsp;</span><span style="--i:9;--w:1.4px">p</span><span style="--i:10;--w:2.8px">r</span><span style="--i:11;--w:2.8px">o</span><span style="--i:12;--w:1.2px">d</span><span style="--i:13;--w:-1.0px">u</span><span style="--i:14;--w:-2.6px">c</span><span style="--i:15;--w:-2.9px">t</span><span style="--i:16;--w:-1.6px">i</span><span style="--i:17;--w:0.5px">o</span><span style="--i:18;--w:2.4px">n</span></div>
+  </div>
+  <div class="sp-bar"><i id="spbar"></i></div>
+  <div class="sp-hint" id="sphint" hidden>Загружаем… соединение медленное</div>
+</div>
 <div id="app"></div>
-<noscript><p style="color:#fff;font:16px sans-serif;padding:24px">Для работы приложения нужен JavaScript.</p></noscript>
-<script type="module" src="js/main.js?v=4"></script>
+<noscript><style>#splash{display:none}</style><p style="color:#fff;font:16px sans-serif;padding:24px">Для работы приложения нужен JavaScript.</p></noscript>
+<script type="module" src="js/main.js?v=5"></script>
 </body>
 </html>
