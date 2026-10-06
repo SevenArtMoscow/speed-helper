@@ -68,3 +68,7 @@ certbot renew --dry-run                 # проверка автопродле�
 
 ## Тесты
 `cd server && npm test` — запускает настоящий сервер на встроенной PostgreSQL и проверяет весь API (≈190 проверок: права доступа, неверные данные, лимиты, удаление аккаунта, заголовки безопасности). Выполняется и автоматически в GitHub Actions при каждом push.
+
+## Приветственная анимация бота
+Ролик `assets/welcome.mp4` (6 с, 1280×720) отправляется ботом по `/start`; GIF-версия `assets/welcome.gif` (640×360) — для обложки бота. Исходник рендера: `assets/render-welcome.cjs` (меняете слова/цвета в файле, `npm i @napi-rs/canvas ffmpeg-static`, `node render-welcome.cjs` → папка `out/`).
+Картинка, которую человек видит **до** нажатия Start: @BotFather → `/mybots` → бот → **Edit Bot → Edit Description Picture** → отправить `assets/welcome.gif`.

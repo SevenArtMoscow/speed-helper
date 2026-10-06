@@ -1,17 +1,44 @@
 // Telegram-бот SPEED HELPER (long polling — вебхук и отдельный порт не нужны).
 //  - /start, /app — приветствие и кнопка открытия мини-приложения; кнопка меню чата тоже открывает приложение;
 //  - рассылка: непереданные записи notifications → sendMessage с кнопкой «Открыть» (бывший tg-notify).
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const WELCOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'welcome.mp4'); // приветственная анимация (assets/render-welcome.cjs)
+const API = process.env.TG_API || 'https://api.telegram.org';
 
 export function startBot({ pool, token, appUrl, admins = [] }) {
   const tg = async (method, body) => {
-    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
     if (!j.ok) throw Object.assign(new Error(`${method}: ${j.description}`), { status: res.status, retryAfter: j.parameters?.retry_after });
     return j.result;
   };
   // Ссылка на экран передаётся через ?r=, а не #: в hash Telegram кладёт данные запуска (tgWebAppData)
   const openBtn = (text, link = '') => ({ inline_keyboard: [[{ text, web_app: { url: appUrl + (link ? '/?r=' + encodeURIComponent(link.replace(/^#/, '')) : '') } }]] });
+
+  // Приветствие с анимацией: первый раз файл загружается в Telegram, дальше отправляется по file_id (мгновенно).
+  // Если анимацию отправить не удалось — обычное сообщение, как раньше.
+  let animId = null;
+  async function sendWelcome(chatId, caption, markup) {
+    try {
+      if (animId) return await tg('sendAnimation', { chat_id: chatId, animation: animId, caption, reply_markup: markup, width: 1280, height: 720, duration: 6 });
+      if (!fs.existsSync(WELCOME)) throw new Error('нет файла ' + WELCOME);
+      const fd = new FormData();
+      fd.append('chat_id', String(chatId)); fd.append('caption', caption); fd.append('reply_markup', JSON.stringify(markup));
+      fd.append('width', '1280'); fd.append('height', '720'); fd.append('duration', '6');
+      fd.append('animation', new Blob([fs.readFileSync(WELCOME)], { type: 'video/mp4' }), 'welcome.mp4');
+      const res = await fetch(`${API}/bot${token}/sendAnimation`, { method: 'POST', body: fd });
+      const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
+      if (!j.ok) throw new Error(j.description);
+      animId = (j.result.animation || j.result.document || {}).file_id || null;
+      return j.result;
+    } catch (e) {
+      console.error('welcome animation failed:', e.message); animId = null; // кэшированный file_id мог устареть — в следующий раз загрузим заново
+      return tg('sendMessage', { chat_id: chatId, text: caption, reply_markup: markup });
+    }
+  }
 
   async function setup() {
     await tg('deleteWebhook', {});
@@ -24,7 +51,7 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
     const text = (m.text || '').trim();
     if (m.chat.type !== 'private') return;
     if (/^\/(start|app)\b/.test(text)) {
-      return tg('sendMessage', { chat_id: m.chat.id, text: `Привет, ${m.from.first_name || 'друг'}! 👋\n\nSPEED HELPER — смены на завтра и исполнители за минуту.\n• Исполнителям: свайпайте смены, откликайтесь, получайте подтверждение.\n• Подрядчикам: публикуйте смену и собирайте команду.\n\nУведомления об откликах и сменах будут приходить сюда.`, reply_markup: openBtn('🚀 Открыть SPEED HELPER') });
+      return sendWelcome(m.chat.id, `Привет, ${m.from.first_name || 'друг'}! 👋\n\nSPEED HELPER — смены на завтра и исполнители за минуту.\n• Исполнителям: свайпайте смены, откликайтесь, получайте подтверждение.\n• Подрядчикам: публикуйте смену и собирайте команду.\n\nУведомления об откликах и сменах будут приходить сюда.`, openBtn('🚀 Открыть SPEED HELPER'));
     }
     if (/^\/privacy\b/.test(text)) {
       return tg('sendMessage', { chat_id: m.chat.id, text: `Политика конфиденциальности: ${appUrl}/legal/privacy.html\nПользовательское соглашение: ${appUrl}/legal/terms.html\n\nУдалить аккаунт и все данные можно в приложении: Профиль → Удалить аккаунт.` });
