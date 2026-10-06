@@ -1,5 +1,5 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
-import { api, track, getSession } from './api.js';
+import { api, track, getSession, tg } from './api.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
 import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money } from './util.js';
 
@@ -15,6 +15,21 @@ export function reportSheet(target_type, target_id) {
     try { await api.report({ target_type, target_id, reason: s.el.querySelector('#rr').value }); s.close(); toast('Жалоба отправлена', 'ok'); }
     catch (err) { toast(errMsg(err), 'err'); e.target.disabled = false; }
   };
+}
+
+// ---------- согласие с условиями (обязательно при первом входе) ----------
+export function openLegal(kind) { const url = location.origin + '/legal/' + kind + '.html'; if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener'); }
+async function consent(ctx) {
+  ctx.render(`<div class="hero">
+    <svg class="bolt" viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+    <h1>Добро пожаловать</h1><p class="mut">Прежде чем начать, подтвердите условия использования.</p>
+    <div class="card" style="margin-top:18px"><div class="row" style="align-items:flex-start">${toggle(false, 'agree')}
+      <div class="sm" style="line-height:1.55">Я принимаю <a class="g" href="#" data-act="legal" data-u="terms">Пользовательское соглашение</a> и даю согласие на обработку моих персональных данных на условиях <a class="g" href="#" data-act="legal" data-u="privacy">Политики конфиденциальности</a>.</div></div></div>
+    <button class="btn pri block" data-act="accept" id="acc" disabled style="margin-top:10px;padding:16px">Продолжить</button>
+    <p class="mut sm" style="text-align:center;margin-top:14px">Данные нужны, чтобы подбирать смены и показывать ваш профиль подрядчикам. Аккаунт можно удалить в любой момент.</p></div>`);
+  ctx.acts.agree = (el) => { el.classList.toggle('on'); el.setAttribute('aria-checked', el.classList.contains('on')); document.getElementById('acc').disabled = !el.classList.contains('on'); };
+  ctx.acts.legal = (el) => openLegal(el.dataset.u);
+  ctx.acts.accept = async () => { await api.acceptTerms(); S.user.terms_accepted = true; track('terms_accepted'); go('#/'); };
 }
 
 // ---------- приветствие ----------
@@ -266,6 +281,6 @@ async function review(ctx, sid) {
 }
 
 export const commonRoutes = [
-  [/^#\/welcome$/, welcome], [/^#\/w\/onboard$/, workerForm], [/^#\/w\/edit$/, workerForm], [/^#\/c\/onboard$/, contractorForm], [/^#\/c\/edit-profile$/, contractorForm],
+  [/^#\/consent$/, consent], [/^#\/welcome$/, welcome], [/^#\/w\/onboard$/, workerForm], [/^#\/w\/edit$/, workerForm], [/^#\/c\/onboard$/, contractorForm], [/^#\/c\/edit-profile$/, contractorForm],
   [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/review\/(\d+)$/, review],
 ];

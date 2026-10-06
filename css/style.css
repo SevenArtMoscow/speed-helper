@@ -165,3 +165,6 @@ input[type=range]{width:100%;accent-color:var(--g)}
 
 [data-act=fav].btn{margin-top:16px}
 a.g{text-decoration:none;font-weight:600}
+
+.irow.click{cursor:pointer}.irow.click:active{background:rgba(255,255,255,.04)}
+.hero .card{background:var(--card)}

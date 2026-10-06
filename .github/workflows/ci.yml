@@ -1,0 +1,25 @@
+name: CI
+# Каждый push и pull request: проверка синтаксиса и полный прогон автотестов сервера (PostgreSQL встроенная, ничего устанавливать не нужно)
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Синтаксис JavaScript
+        run: for f in js/*.js server/*.js; do node --check "$f"; done
+      - name: Синтаксис shell-скриптов
+        run: for f in deploy/*.sh; do bash -n "$f"; done
+      - name: Автотесты сервера и API
+        working-directory: server
+        run: npm ci && npm test

@@ -5,7 +5,7 @@ import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON } from './ui.js';
 import { createMap, placemark, radiusCircle, shiftsLayer, pickLocation, routeLink } from './maps.js';
 import { esc, dateLabel, money, kmLabel, plural, phone10, fmtPhone } from './util.js';
-import { reportSheet, shiftName } from './screens-common.js';
+import { reportSheet, shiftName, openLegal } from './screens-common.js';
 
 const FKEY = 'sh_filters_v1';
 const defFilters = () => ({ date: 'any', min_pay: 0, radius_km: 30, geo: 'msk', lat: CONFIG.DEFAULT_CITY.lat, lng: CONFIG.DEFAULT_CITY.lng, categories: [] });
@@ -303,8 +303,14 @@ async function profile(ctx) {
   ctx.render(`${profileBlock(w, true)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${w.percent < 100 ? `<p class="mut sm" style="margin:12px 0 0">Чем полнее профиль, тем больше доверия подрядчиков и выше позиция в поиске.</p>` : ''}</div>
-    <button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}`);
+    <button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/w/edit');
+}
+// «Помощь и документы»: политика, соглашение, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
+export function helpBlock() {
+  const link = (ic, t, act, extra = '') => `<div class="irow click" data-act="${act}" ${extra}><span class="ico">${ICON[ic]}</span><span class="k" style="color:var(--txt);font-size:15px">${t}</span><span class="v mut">›</span></div>`;
+  return `<div class="sect">Помощь и документы</div><div class="info">${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}${S.cfg && S.cfg.support_url ? link('chats', 'Написать в поддержку', 'support') : ''}</div>
+    <button class="btn danger block" data-act="delAccount" style="margin-top:14px">Удалить аккаунт</button>`;
 }
 export function roleSwitch() {
   const other = S.role === 'worker' ? 'contractor' : 'worker';
@@ -318,6 +324,18 @@ export function devPanel(u) {
     <button class="btn danger sm" data-act="devreset" style="margin-top:10px">Стереть все локальные данные</button></div>${u.is_admin ? '<button class="btn block ghost" data-act="admin">Админ-панель</button>' : ''}`;
 }
 export function bindCommonProfile(ctx, u) {
+  ctx.acts.legal = (el) => openLegal(el.dataset.u);
+  ctx.acts.support = () => {
+    const url = S.cfg.support_url;
+    if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(url)) tg.openTelegramLink(url); // чат поддержки открывается внутри Telegram
+    else if (tg) tg.openLink(url);
+    else window.open(url, '_blank', 'noopener');
+  };
+  ctx.acts.delAccount = async () => {
+    if (!(await confirmBox('Удалить аккаунт?', { ok: 'Продолжить', danger: true, sub: 'Профиль, избранное и уведомления будут стёрты, активные смены и отклики отменены. Это нельзя отменить.' }))) return;
+    if (!(await confirmBox('Точно удалить навсегда?', { ok: 'Да, удалить', danger: true, sub: 'Рейтинг и история смен будут потеряны.' }))) return;
+    await api.deleteAccount(); localStorage.removeItem('sh_role_' + S.user.id); S.role = null; await refreshMe(); toast('Аккаунт удалён', 'ok'); go('#/');
+  };
   ctx.acts.switch = () => { const o = S.role === 'worker' ? 'contractor' : 'worker'; setRole(o); go(S.user.roles.includes(o) ? '#/' : (o === 'worker' ? '#/w/onboard' : '#/c/onboard')); };
   ctx.acts.admin = () => go('#/admin');
   ctx.acts.dev = (el) => setDevUser(el.dataset.id);

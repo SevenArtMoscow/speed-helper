@@ -4,7 +4,7 @@ import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, empty
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
-import { profileBlock, roleSwitch, devPanel, bindCommonProfile } from './screens-worker.js';
+import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock } from './screens-worker.js';
 
 const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
@@ -246,7 +246,7 @@ async function profile(ctx) {
   ctx.render(`${heroCard({ av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
-    <button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}`);
+    <button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/c/edit-profile');
 }
 

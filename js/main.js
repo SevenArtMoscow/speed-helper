@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { api, login, tg, MODE, track, getSession } from './api.js';
+import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
 import { S, logo, go, back, toast, errMsg, skeleton, setBell, ICON } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
@@ -37,7 +37,7 @@ function shell() {
 
 export function renderTabs(hash) {
   const t = $('#tabs'), tabs = TABS[S.role];
-  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash.includes('onboard')) { t.hidden = true; return; }
+  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; return; }
   t.hidden = false;
   const unread = S.user ? S.user.unread : 0;
   t.innerHTML = tabs.map(([h, ic, l]) => `<a href="${h}" class="${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
@@ -59,6 +59,8 @@ async function route() {
       else h = S.role === 'contractor' ? '#/c/home' : '#/w/search';
       if (location.hash !== h) { history.replaceState(null, '', h); }
     }
+    // без принятия соглашения дальше экрана согласия не пускаем
+    if (S.user && S.user.terms_accepted === false && h !== '#/consent') { h = '#/consent'; if (location.hash !== h) history.replaceState(null, '', h); }
     for (const [re, fn] of ROUTES) {
       const m = h.match(re);
       if (m) { renderTabs(h); await fn(ctx, ...m.slice(1)); if (my !== navToken) return; ctx.main.scrollTop = 0; track('screen', { r: h.split('/').slice(0, 3).join('/') }); return; }
@@ -88,6 +90,7 @@ async function boot() {
   try {
     S.user = await login();
     S.cats = await api.categories();
+    publicConfig().then((c) => (S.cfg = c));
   } catch (e) {
     ctx.render(`<div class="empty"><h2>Не удалось войти</h2><p>${esc(errMsg(e))}</p>${tg ? '' : '<p class="sm">Откройте приложение через Telegram-бота.</p>'}<button class="btn pri" onclick="location.reload()">Повторить</button></div>`);
     return;
@@ -101,6 +104,7 @@ async function boot() {
   window.addEventListener('hashchange', route);
   setInterval(tick, CONFIG.POLL_MS);
   document.addEventListener('visibilitychange', () => !document.hidden && tick());
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
   track('app_open', { v: CONFIG.APP_VERSION });
   route();
 }

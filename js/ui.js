@@ -2,7 +2,7 @@
 import { esc, initials, $, fmtPhone } from './util.js';
 import { api } from './api.js';
 
-export const S = { user: null, role: null, cats: [], route: '' };
+export const S = { user: null, role: null, cats: [], route: '', cfg: {} };
 
 export const BOLT = '<svg viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
 // Линейные иконки 24×24 (цвет — currentColor): нижнее меню и шапка

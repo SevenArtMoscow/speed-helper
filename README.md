@@ -14,6 +14,8 @@ Telegram Mini App для поиска краткосрочных смен и и�
    curl -fsSL https://raw.githubusercontent.com/SevenArtMoscow/speed-helper/main/deploy/setup.sh -o setup.sh
    TG_BOT_TOKEN=<токен> ADMIN_TG_IDS=<ваш Telegram ID> bash setup.sh
    ```
-   Скрипт ставит PostgreSQL, Node 22, nginx, HTTPS (Let's Encrypt), сервис `speedhelper`, ежедневные бэкапы БД в `/var/backups/speedhelper`.
-3. В @BotFather: `/mybots → Bot Settings → Configure Mini App → Enable` → URL `https://speedhelper.ru` (кнопку меню сервер ставит сам).
-4. Обновление кода: `bash setup.sh` ещё раз (данные и `.env` сохраняются). Логи: `journalctl -u speedhelper -f`.
+   Скрипт ставит PostgreSQL, Node 22, nginx, HTTPS (Let's Encrypt), сервис `speedhelper`, защиту сервера (fail2ban, автообновления), ночные бэкапы БД с проверкой и мониторинг с оповещениями в Telegram.
+3. В @BotFather: `/mybots → Bot Settings → Configure Mini App → Enable` → URL `https://speedhelper.ru`.
+4. Заполнить `OPERATOR_NAME` и `OPERATOR_CONTACT` в `/opt/speedhelper/server/.env` (реквизиты оператора для политики конфиденциальности).
+
+Обновление, откат, бэкапы, мониторинг, замена секретов — [docs/OPERATIONS.md](docs/OPERATIONS.md). Что сделать перед запуском — [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md). Автотесты: `cd server && npm test`.

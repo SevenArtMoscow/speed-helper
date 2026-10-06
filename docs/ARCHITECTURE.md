@@ -11,7 +11,7 @@ Telegram ──► https://speedhelper.ru (nginx, Let's Encrypt) ──► serve
              server/bot.js     long polling: /start, /help, кнопка меню «Открыть»; рассылка notifications (каждые 3 с)
 ```
 Ссылка из уведомления открывает нужный экран: `https://speedhelper.ru/?r=/c/shift/5` → `#/c/shift/5`.
-Секреты (`TG_BOT_TOKEN`, `JWT_SECRET`, `DATABASE_URL`) — только в `server/.env` на сервере.
+Секреты (`TG_BOT_TOKEN`, `JWT_SECRET`, `DATABASE_URL`) — только в `server/.env` на сервере. Защита: лимиты частоты запросов, строгий CSP и заголовки безопасности, согласие и удаление аккаунта (152-ФЗ), юридические страницы `/legal/*`.
 
 ## Вариант с Supabase (не используется в проде)
 ```
@@ -36,8 +36,8 @@ PostgreSQL (Supabase): таблицы закрыты RLS без политик; 
 Все методы клиента реализованы в `002_api.sql` + `003_api_more.sql` (SQL прогнан на PostgreSQL сквозным тестом: вход, анкеты, смена, отклик, принятие, чаты, завершение, отзыв, админка).
 Уведомления: `notifications` → Edge Function `tg-notify` (Bot API). Пользователь получит сообщение, только если хоть раз нажал Start у бота.
 
-## Не сделано вообще (по ТЗ)
-Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; ИИ-помощник на LLM (сейчас правила в `parseShiftText`); Sentry; бэкапы; нагрузочные тесты; staging-среда.
+## Не сделано (по ТЗ, не блокирует запуск)
+Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; ИИ-помощник на LLM (сейчас правила в `parseShiftText`); Sentry; нагрузочные тесты; staging-среда. Эксплуатация и безопасность — см. [OPERATIONS.md](OPERATIONS.md) и [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md).
 
 ## Развёртывание Supabase
 1. Проект Supabase на аккаунте **владельцев** (ТЗ §45).

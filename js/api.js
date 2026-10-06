@@ -55,7 +55,7 @@ async function call(fn, args) {
     if (!res.ok) throw Object.assign(new Error(j.message || 'Ошибка сервера'), { code: j.hint || j.code || 'server', status: res.status });
     return j;
   } catch (e) {
-    if (!['invalid', 'forbidden', 'closed', 'conflict', 'full', 'profile_required', 'own_shift'].includes(e.code) && fn !== 'logError') {
+    if (!['invalid', 'forbidden', 'closed', 'conflict', 'full', 'profile_required', 'own_shift', 'rate'].includes(e.code) && fn !== 'logError') {
       // техническая ошибка — пишем в журнал: кто, где, в какой версии
       call('logError', [{ fn, message: e.message, code: e.code || null, screen: location.hash, ua: navigator.userAgent.slice(0, 120) }]).catch(() => {});
     }
@@ -63,5 +63,7 @@ async function call(fn, args) {
   }
 }
 
+// публичные настройки сервера (ссылка на поддержку, версия); недоступность не мешает работе
+export const publicConfig = () => (MODE === 'server' ? fetch(`${CONFIG.API_BASE}/config`).then((r) => r.json()).catch(() => ({})) : Promise.resolve({}));
 export const api = new Proxy({}, { get: (_, fn) => (...args) => call(fn, args) });
 export const track = (event, props) => { if (session.me) call('track', [event, props]).catch(() => {}); };

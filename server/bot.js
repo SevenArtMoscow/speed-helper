@@ -3,7 +3,7 @@
 //  - рассылка: непереданные записи notifications → sendMessage с кнопкой «Открыть» (бывший tg-notify).
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function startBot({ pool, token, appUrl }) {
+export function startBot({ pool, token, appUrl, admins = [] }) {
   const tg = async (method, body) => {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
@@ -15,7 +15,7 @@ export function startBot({ pool, token, appUrl }) {
 
   async function setup() {
     await tg('deleteWebhook', {});
-    await tg('setMyCommands', { commands: [{ command: 'start', description: 'Открыть SPEED HELPER' }, { command: 'help', description: 'Как это работает' }] });
+    await tg('setMyCommands', { commands: [{ command: 'start', description: 'Открыть SPEED HELPER' }, { command: 'help', description: 'Как это работает' }, { command: 'privacy', description: 'Политика конфиденциальности' }] });
     if (appUrl) await tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Открыть', web_app: { url: appUrl } } });
     await tg('setMyDescription', { description: 'SPEED HELPER — краткосрочные смены и исполнители. Найди работу на завтра или людей на смену за минуту.' }).catch(() => {});
   }
@@ -25,6 +25,9 @@ export function startBot({ pool, token, appUrl }) {
     if (m.chat.type !== 'private') return;
     if (/^\/(start|app)\b/.test(text)) {
       return tg('sendMessage', { chat_id: m.chat.id, text: `Привет, ${m.from.first_name || 'друг'}! 👋\n\nSPEED HELPER — смены на завтра и исполнители за минуту.\n• Исполнителям: свайпайте смены, откликайтесь, получайте подтверждение.\n• Подрядчикам: публикуйте смену и собирайте команду.\n\nУведомления об откликах и сменах будут приходить сюда.`, reply_markup: openBtn('🚀 Открыть SPEED HELPER') });
+    }
+    if (/^\/privacy\b/.test(text)) {
+      return tg('sendMessage', { chat_id: m.chat.id, text: `Политика конфиденциальности: ${appUrl}/legal/privacy.html\nПользовательское соглашение: ${appUrl}/legal/terms.html\n\nУдалить аккаунт и все данные можно в приложении: Профиль → Удалить аккаунт.` });
     }
     if (/^\/help\b/.test(text)) {
       return tg('sendMessage', { chat_id: m.chat.id, text: 'Нажмите кнопку «Открыть» внизу чата или кнопку ниже. В приложении выберите роль — исполнитель или подрядчик — и заполните анкету. По вопросам и жалобам используйте кнопку «Пожаловаться» в приложении.', reply_markup: openBtn('Открыть SPEED HELPER') });
@@ -72,4 +75,6 @@ export function startBot({ pool, token, appUrl }) {
   setup().catch((e) => console.error('bot setup failed', e.message));
   poll();
   notifyLoop();
+  // оповещение владельцев (сбои, перезапуски); не падает, если кто-то из них не запускал бота
+  return { alert: async (text) => { for (const id of admins) await tg('sendMessage', { chat_id: id, text }).catch(() => {}); } };
 }

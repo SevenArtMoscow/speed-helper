@@ -1,0 +1,275 @@
+// Автотесты сервера: поднимают настоящий server.js на встроенной PostgreSQL (PGlite) и прогоняют весь API —
+// правильные и неправильные данные, права доступа, лимиты, удаление аккаунта. Запуск: cd server && npm test
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { PGlite } from '@electric-sql/pglite';
+import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
+
+const TOKEN = '123456:TEST_ONLY', PORT = 3199, DBPORT = 54329;
+const db = await PGlite.create();
+const sock = new PGLiteSocketServer({ db, port: DBPORT, host: '127.0.0.1' });
+await sock.start();
+Object.assign(process.env, { DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${DBPORT}/postgres?sslmode=disable`, PG_POOL_MAX: '1', PORT: String(PORT), DISABLE_BOT: '1', TG_BOT_TOKEN: TOKEN,
+  JWT_SECRET: 'test-secret', ADMIN_TG_IDS: '1', APP_URL: `http://127.0.0.1:${PORT}`, OPERATOR_NAME: 'ООО Тестовый оператор', OPERATOR_CONTACT: 'help@example.test', SUPPORT_URL: 'https://t.me/test_support', NODE_ENV: 'test', RATE_MULT: '10' });
+await import('../server.js');
+const ROOT = `http://127.0.0.1:${PORT}`, BASE = ROOT + '/api';
+for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
+
+const initData = (user) => { const p = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify(user) }); const c = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n'); p.set('hash', crypto.createHmac('sha256', crypto.createHmac('sha256', 'WebAppData').update(TOKEN).digest()).update(c).digest('hex')); return p.toString(); };
+async function login(id, name) {
+  const r = await (await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id, first_name: name }) }) })).json();
+  const call = async (fn, ...args) => { const res = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + r.access_token }, body: JSON.stringify({ fn, args }) }); const j = await res.json().catch(() => ({})); return { status: res.status, body: j }; };
+  return { id: r.user_id, call };
+}
+let pass = 0, fail = 0; const bugs = [];
+const ok = async (name, p, check) => { const r = await p; const good = r.status === 200 && (!check || check(r.body)); good ? pass++ : (fail++, bugs.push(`${name}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)); return r.body; };
+const no = async (name, p, hint) => { const r = await p; const good = r.status !== 200 && r.status !== 500 && (!hint || r.body.hint === hint); good ? pass++ : (fail++, bugs.push(`${name}: ожидалась ошибка ${hint || ''}, получено ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)); return r.body; };
+const check = (name, cond, info = '') => { cond ? pass++ : (fail++, bugs.push(`${name} ${info}`)); };
+const key = () => crypto.randomUUID();
+const day = (n) => { const d = new Date(Date.now() + n * 864e5 + 3 * 36e5); return d.toISOString().slice(0, 10); }; // МСК
+
+test('API: полный сценарий', { timeout: 180000 }, async (t) => {
+  // после теста даём раннеру записать результат и завершаем процесс (сервер и БД держат его живым)
+  t.after(() => setTimeout(() => process.exit(process.exitCode || 0), 1000));
+  const A = await login(1, 'Админ'), C = await login(6001, 'Подрядчик'), C2 = await login(6002, 'Подрядчик2');
+  const W1 = await login(6101, 'Исп1'), W2 = await login(6102, 'Исп2'), W3 = await login(6103, 'Исп3'), X = await login(6199, 'Пустой');
+  const cats = await ok('categories', W1.call('categories'), (b) => b.length > 0);
+
+  // ----- анкеты -----
+  const wp = { name: 'Пётр', city: 'Москва', age: 25, avatar: 'data:image/png;base64,AA', skills: ['погрузка'], license: [], phone: '+79161234567' };
+  await no('saveWorker без имени', W1.call('saveWorker', { ...wp, name: '' }), 'invalid');
+  await no('saveWorker без города', W1.call('saveWorker', { ...wp, city: ' ' }), 'invalid');
+  await no('saveWorker возраст abc', W1.call('saveWorker', { ...wp, age: 'abc' }), 'invalid');
+  await no('saveWorker возраст пусто', W1.call('saveWorker', { ...wp, age: '' }), 'invalid');
+  await no('saveWorker возраст 10', W1.call('saveWorker', { ...wp, age: 10 }), 'invalid');
+  await no('saveWorker без фото', W1.call('saveWorker', { ...wp, avatar: null }), 'invalid');
+  await ok('saveWorker W1', W1.call('saveWorker', wp), (b) => b.roles.includes('worker'));
+  await ok('saveWorker W2', W2.call('saveWorker', { ...wp, name: 'Анна' }));
+  await ok('saveWorker W3', W3.call('saveWorker', { ...wp, name: 'Олег', phone: '' }));
+  const cp = { name: 'Иван', company: 'ООО Тест', city: 'Москва', phone: '9161234567', about: '' };
+  await no('saveContractor короткий телефон', C.call('saveContractor', { ...cp, phone: '916' }), 'invalid');
+  await no('saveContractor без имени', C.call('saveContractor', { ...cp, name: '' }), 'invalid');
+  await ok('saveContractor C', C.call('saveContractor', cp), (b) => b.contractor.phone === '9161234567');
+  await ok('saveContractor C2', C2.call('saveContractor', { ...cp, name: 'Мария', phone: '+7 (926) 000-11-22' }), (b) => b.contractor.phone === '9260001122');
+
+  // ----- без профиля -----
+  await no('apply без профиля', X.call('apply', 1), 'profile_required');
+  await no('createShift без профиля', X.call('createShift', {}, key()), 'profile_required');
+
+  // ----- создание смены -----
+  const sp = { title: 'Разгрузка мебели', category_id: cats[0].id, description: 'тест', address: 'Москва, Тверская 1', lat: 55.76, lng: 37.61, date: day(1), start: '09:00', end: '18:00', pay: 3000, people: 2, requirements: ['18+'], notify_favorites: false };
+  await no('createShift короткое название', C.call('createShift', { ...sp, title: 'аб' }, key()), 'invalid');
+  await no('createShift без категории', C.call('createShift', { ...sp, category_id: '' }, key()), 'invalid');
+  await no('createShift без адреса', C.call('createShift', { ...sp, address: '' }, key()), 'invalid');
+  await no('createShift дата в прошлом', C.call('createShift', { ...sp, date: day(-1) }, key()), 'invalid');
+  await no('createShift без даты', C.call('createShift', { ...sp, date: '' }, key()), 'invalid');
+  await no('createShift оплата 0', C.call('createShift', { ...sp, pay: 0 }, key()), 'invalid');
+  await no('createShift оплата abc', C.call('createShift', { ...sp, pay: 'abc' }, key()), 'invalid');
+  await no('createShift оплата огромная', C.call('createShift', { ...sp, pay: 99999999999 }, key()), 'invalid');
+  await no('createShift людей 0', C.call('createShift', { ...sp, people: 0 }, key()), 'invalid');
+  await no('createShift людей 501', C.call('createShift', { ...sp, people: 501 }, key()), 'invalid');
+  await no('createShift без начала', C.call('createShift', { ...sp, start: '' }, key()), 'invalid');
+  await no('createShift без окончания', C.call('createShift', { ...sp, end: '' }, key()), 'invalid');
+  await no('createShift начало = окончание', C.call('createShift', { ...sp, start: '10:00', end: '10:00' }, key()), 'invalid');
+  const k1 = key();
+  const S1 = await ok('createShift S1', C.call('createShift', sp, k1), (b) => b.id && b.status === 'open');
+  await ok('createShift повтор (идемпотентность)', C.call('createShift', sp, k1), (b) => b.id === S1.id);
+  const S2 = await ok('createShift S2 ночная', C.call('createShift', { ...sp, title: 'Ночная уборка', people: 1, start: '22:00', end: '06:00', date: day(2), category_id: cats[1].id }, key()));
+  const S3 = await ok('createShift S3 (C2)', C2.call('createShift', { ...sp, title: 'Склад', people: 3, pay: 5000 }, key()));
+
+  // ----- лента и отклики -----
+  await ok('feed W1', W1.call('feed', { radius_km: 30 }), (b) => b.items.length === 3);
+  await ok('feed завтра', W1.call('feed', { date: 'tomorrow' }), (b) => b.items.every((s) => s.date === day(1)));
+  await ok('feed мин. оплата', W1.call('feed', { min_pay: 4000 }), (b) => b.items.length === 1);
+  await ok('feed категория', W1.call('feed', { categories: [cats[1].id] }), (b) => b.items.length === 1);
+  await ok('feed радиус 1км от другого места', W1.call('feed', { lat: 59.93, lng: 30.31, radius_km: 1 }), (b) => b.items.length === 0);
+  await ok('feed подрядчик не видит своих', C.call('feed', {}), (b) => !b.items.some((s) => s.contractor_id === C.id));
+  await ok('getShift', W1.call('getShift', S1.id), (b) => b.title === sp.title);
+  await no('getShift несуществующей', W1.call('getShift', 99999), 'not_found');
+  await ok('skip', W1.call('skip', S3.id)); await ok('feed без пропущенной', W1.call('feed', {}), (b) => !b.items.some((s) => s.id === S3.id));
+  await ok('unskip', W1.call('unskip', S3.id)); await ok('feed после возврата', W1.call('feed', {}), (b) => b.items.some((s) => s.id === S3.id));
+  const a1 = await ok('apply W1→S1', W1.call('apply', S1.id), (b) => b.status === 'pending');
+  await ok('apply повтор', W1.call('apply', S1.id), (b) => b.duplicate && b.id === a1.id);
+  await ok('undoApply', W1.call('undoApply', S1.id), (b) => b === true);
+  const a1b = await ok('apply снова', W1.call('apply', S1.id));
+  const a2 = await ok('apply W2→S1', W2.call('apply', S1.id));
+  const a3 = await ok('apply W3→S1', W3.call('apply', S1.id));
+  const a3s2 = await ok('apply W3→S2', W3.call('apply', S2.id));
+  await ok('withdraw pending', W3.call('withdraw', a3s2.id), (b) => b.removed);
+  await ok('saveWorker C (две роли)', C.call('saveWorker', wp));
+  await no('apply на свою смену', C.call('apply', S1.id), 'own_shift');
+  await ok('myApplications W1', W1.call('myApplications'), (b) => b.length === 1 && b[0].shift.id === S1.id);
+  await ok('applicants C', C.call('applicants', S1.id), (b) => b.length === 3);
+  await no('applicants чужой', C2.call('applicants', S1.id), 'forbidden');
+  await ok('myShifts C', C.call('myShifts'), (b) => b.find((s) => s.id === S1.id).pending_count === 3);
+
+  // ----- решения по откликам -----
+  await no('decide чужим подрядчиком', C2.call('decide', a1b.id, 'accepted'), 'forbidden');
+  await no('decide неверное решение', C.call('decide', a1b.id, 'maybe'), 'invalid');
+  await ok('accept W1', C.call('decide', a1b.id, 'accepted'), (b) => b.status === 'accepted');
+  await ok('accept W1 повтор', C.call('decide', a1b.id, 'accepted'));
+  await ok('accept W2 (смена набрана)', C.call('decide', a2.id, 'accepted'));
+  await ok('getShift full', W3.call('getShift', S1.id), (b) => b.status === 'full');
+  await no('accept W3 сверх мест', C.call('decide', a3.id, 'accepted'));
+  await ok('reject W3', C.call('decide', a3.id, 'rejected'), (b) => b.status === 'rejected');
+  await no('decide уже отклонённого', C.call('decide', a3.id, 'accepted'), 'conflict');
+  await ok('contractorStats', C.call('contractorStats'), (b) => b.active === 2 && b.workers === 2);
+
+  // ----- команда и чат -----
+  await ok('team W1', W1.call('team', S1.id), (b) => b.members.length === 3 && b.my_role === 'worker');
+  await no('team посторонний', W3.call('team', S1.id), 'forbidden');
+  await ok('myTeams W1', W1.call('myTeams'), (b) => b.length === 1);
+  const m1 = await ok('sendMessage team W1', W1.call('sendMessage', 'shift:' + S1.id, 'Всем привет', key()));
+  await no('sendMessage пустое', W1.call('sendMessage', 'shift:' + S1.id, '   ', key()), 'invalid');
+  await no('sendMessage 2001 символ', W1.call('sendMessage', 'shift:' + S1.id, 'я'.repeat(2001), key()), 'invalid');
+  await no('sendMessage посторонний', W3.call('sendMessage', 'shift:' + S1.id, 'хак', key()), 'forbidden');
+  await no('sendMessage неверный чат', W1.call('sendMessage', 'abc', 'x', key()), 'invalid');
+  await no('sendMessage dm несуществующего', W1.call('sendMessage', 'dm:99999', 'x', key()), 'not_found');
+  await ok('messages C', C.call('messages', 'shift:' + S1.id, 0), (b) => b.length === 1);
+  await no('pin работником', W1.call('pinMessage', m1.id, true), 'forbidden');
+  await ok('pin подрядчиком', C.call('pinMessage', m1.id, true));
+  await ok('team pinned', W2.call('team', S1.id), (b) => b.pinned && b.pinned.id === m1.id);
+  await ok('setSenior W1', C.call('setSenior', S1.id, W1.id, ['pin', 'attendance']), (b) => b.role === 'senior');
+  await no('setSenior не владельцем', W1.call('setSenior', S1.id, W2.id, ['pin']), 'forbidden');
+  await ok('pin старшим', W1.call('pinMessage', m1.id, false));
+  await ok('attendance старшим', W1.call('setAttendance', S1.id, W2.id, true), (b) => b.attended === true);
+  await no('remove старшим без права', W1.call('removeMember', S1.id, W2.id), 'forbidden');
+  await ok('removeMember W2', C.call('removeMember', S1.id, W2.id));
+  await ok('getShift снова open', W3.call('getShift', S1.id), (b) => b.status === 'open');
+  await ok('myApplications W2 cancelled', W2.call('myApplications'), (b) => b[0].status === 'cancelled');
+
+  // ----- личные чаты -----
+  await ok('dm W1→C', W1.call('sendMessage', 'dm:' + a1b.id, 'Вопрос', key()));
+  await ok('dm C читает', C.call('messages', 'dm:' + a1b.id, 0), (b) => b.length === 1 && b[0].role === 'worker');
+  await no('dm посторонний читает', W3.call('messages', 'dm:' + a1b.id, 0), 'forbidden');
+  await ok('dmInfo', C.call('dmInfo', a1b.id), (b) => b.can_manage && b.title === 'Пётр');
+  await ok('myDialogs W3 (отклонён, без сообщений) пуст', W3.call('myDialogs'), (b) => b.length === 0);
+  await ok('myDialogs C', C.call('myDialogs'), (b) => b.some((d) => d.app_id === a1b.id));
+
+  // ----- изменение смены -----
+  await no('updateShift людей меньше принятых', C.call('updateShift', S1.id, { people: 0 }), 'invalid');
+  await no('updateShift оплата abc', C.call('updateShift', S1.id, { pay: 'abc' }), 'invalid');
+  await no('updateShift чужим', C2.call('updateShift', S1.id, { pay: 100 }), 'forbidden');
+  await ok('updateShift', C.call('updateShift', S1.id, { pay: 3500, people: 1 }), (b) => b.pay === 3500 && b.status === 'full');
+
+  // ----- избранное и страницы -----
+  await ok('toggleFav W1→C', W1.call('toggleFav', C.id), (b) => b === true);
+  await ok('favorites contractor', W1.call('favorites', 'contractor'), (b) => b.length === 1 && b[0].open_shifts >= 1);
+  await ok('favIds', W1.call('favIds'), (b) => b.includes(C.id));
+  await ok('toggleFav C→W1', C.call('toggleFav', W1.id));
+  await ok('favorites worker', C.call('favorites', 'worker'), (b) => b.length === 1);
+  await ok('contractorPage', W1.call('contractorPage', C.id), (b) => b.is_fav && b.shifts.length >= 1);
+  await ok('workerPage с телефоном (есть отклик)', C.call('workerPage', W1.id), (b) => b.worker.phone === wp.phone);
+  await ok('workerPage без телефона (нет отклика)', C2.call('workerPage', W1.id), (b) => !('phone' in b.worker));
+
+  // ----- завершение и отзывы -----
+  await no('completeShift чужим', C2.call('completeShift', S1.id), 'forbidden');
+  await ok('completeShift', C.call('completeShift', S1.id), (b) => b.status === 'completed');
+  await ok('pendingReviews W1', W1.call('pendingReviews'), (b) => b.length === 1 && b[0].to_role === 'contractor');
+  await ok('pendingReviews C', C.call('pendingReviews'), (b) => b.length === 1 && b[0].to_user === W1.id);
+  await no('review без звёзд', W1.call('submitReview', { shift_id: S1.id, to_user: C.id, stars: 0 }), 'invalid');
+  await no('review посторонний', W3.call('submitReview', { shift_id: S1.id, to_user: C.id, stars: 5 }), 'forbidden');
+  await ok('review W1→C', W1.call('submitReview', { shift_id: S1.id, to_user: C.id, stars: 5, criteria: { Условия: 5 }, text: 'Отлично' }));
+  await ok('review повтор', W1.call('submitReview', { shift_id: S1.id, to_user: C.id, stars: 4 }), (b) => b.duplicate);
+  await ok('review C→W1', C.call('submitReview', { shift_id: S1.id, to_user: W1.id, stars: 4 }));
+  await ok('рейтинг подрядчика', W1.call('contractorPage', C.id), (b) => b.contractor.rating === 5 && b.reviews.length === 1);
+  await ok('shifts_done W1', C.call('workerPage', W1.id), (b) => b.worker.shifts_done === 1);
+  await no('updateShift завершённой', C.call('updateShift', S1.id, { pay: 1 }), 'closed');
+
+  // ----- отмена смены -----
+  await ok('apply W2→S2', W2.call('apply', S2.id));
+  await ok('cancelShift S2', C.call('cancelShift', S2.id), (b) => b.status === 'cancelled');
+  await ok('W2 уведомлён об отмене', W2.call('notifications'), (b) => b.some((n) => n.type === 'shift_cancelled'));
+  await no('apply на отменённую', W1.call('apply', S2.id), 'closed');
+
+  // ----- уведомления, жалобы, аналитика -----
+  await ok('notifications W1', W1.call('notifications'), (b) => b.length > 0);
+  await ok('markRead', W1.call('markRead')); await ok('me unread 0', W1.call('me'), (b) => b.unread === 0);
+  await no('report без причины', W1.call('report', { target_type: 'contractor', target_id: C.id, reason: 'a' }), 'invalid');
+  await no('report неверный тип', W1.call('report', { target_type: 'xxx', target_id: 1, reason: 'плохо себя вёл' }));
+  await ok('report', W1.call('report', { target_type: 'contractor', target_id: C.id, reason: 'Опоздал с оплатой' }));
+  await ok('track', W1.call('track', 'test', { a: 1 })); await ok('logError', W1.call('logError', { message: 'test' }));
+  await no('неизвестный метод', W1.call('dropDatabase'), 'not_implemented');
+
+  // ----- админка -----
+  await no('adminStats не админ', W1.call('adminStats'), 'forbidden');
+  await ok('adminStats', A.call('adminStats'), (b) => b.users >= 7);
+  const users = await ok('adminUsers', A.call('adminUsers'), (b) => b.length >= 7);
+  await ok('adminBlock W3', A.call('adminBlock', W3.id, true));
+  const blocked = await W3.call('me'); blocked.status === 401 && blocked.body.hint === 'blocked' ? pass++ : (fail++, bugs.push('заблокированный не получил отказ: ' + JSON.stringify(blocked)));
+  await ok('adminBlock снять', A.call('adminBlock', W3.id, false)); await ok('W3 снова работает', W3.call('me'));
+  await no('adminBlock админа', A.call('adminBlock', A.id, true), 'forbidden');
+  await ok('adminVerify C', A.call('adminVerify', C.id, true)); await ok('verified виден', W1.call('contractorPage', C.id), (b) => b.contractor.verified === true);
+  await ok('adminShifts', A.call('adminShifts'), (b) => b.length >= 3);
+  await ok('adminHideShift', A.call('adminHideShift', S3.id, true)); await ok('скрытая не в ленте', W1.call('feed', {}), (b) => !b.items.some((s) => s.id === S3.id));
+  await ok('adminHideShift вернуть', A.call('adminHideShift', S3.id, false));
+  const reps = await ok('adminReports', A.call('adminReports'), (b) => b.length >= 1);
+  await ok('adminResolveReport', A.call('adminResolveReport', reps[0].id, 'resolved'));
+  await no('adminResolveReport неверный статус', A.call('adminResolveReport', reps[0].id, 'xxx'));
+  await ok('adminCategories', A.call('adminCategories'));
+  const nc = await ok('adminSaveCategory новая', A.call('adminSaveCategory', { id: null, name: 'Тест-категория', active: true }));
+  await no('adminSaveCategory пустое имя', A.call('adminSaveCategory', { id: null, name: ' ', active: true }), 'invalid');
+  await ok('adminAudit', A.call('adminAudit'), (b) => b.length > 0);
+  await ok('withdraw accepted', W1.call('apply', S3.id).then(async (r) => { const ap = r.body; await C2.call('decide', ap.id, 'accepted'); return W1.call('withdraw', ap.id); }), (b) => b.status === 'cancelled');
+
+
+  // ===== продакшен: согласие, удаление аккаунта, лимиты, заголовки =====
+  const T = await login(8001, 'Новый');
+  await ok('me: соглашение не принято', T.call('me'), (b) => b.terms_accepted === false);
+  await ok('acceptTerms', T.call('acceptTerms')); await ok('me: соглашение принято', T.call('me'), (b) => b.terms_accepted === true);
+
+  // удаление аккаунта исполнителя: отклик и место в команде отменяются, профиль стёрт, подрядчик уведомлён
+  const D = await login(8002, 'Удаляемый'); await D.call('acceptTerms');
+  await ok('saveWorker D', D.call('saveWorker', { ...wp, name: 'Удаляемый Иван' }));
+  const dsh = await ok('createShift для D', C.call('createShift', { ...sp, title: 'Смена для удаления', people: 5, date: day(3) }, key()));
+  const dap = await ok('apply D', D.call('apply', dsh.id)); await ok('accept D', C.call('decide', dap.id, 'accepted'));
+  await ok('sendMessage D', D.call('sendMessage', 'shift:' + dsh.id, 'Секретное сообщение', key()));
+  await ok('deleteAccount D', D.call('deleteAccount'));
+  await ok('после удаления: профиля нет, соглашение сброшено', D.call('me'), (b) => b.worker === null && b.roles.length === 0 && b.terms_accepted === false);
+  await ok('после удаления: отклик отменён', C.call('applicants', dsh.id), (b) => b.find((x) => x.id === dap.id).status === 'cancelled');
+  await ok('после удаления: сообщение обезличено', C.call('messages', 'shift:' + dsh.id, 0), (b) => b[0].text === '[сообщение удалено]');
+  await ok('подрядчик уведомлён об уходе', C.call('notifications'), (b) => b.some((n) => n.type === 'member_left'));
+  await ok('D может зарегистрироваться заново', D.call('acceptTerms'));
+
+  // удаление аккаунта подрядчика: открытые смены отменяются, исполнители уведомлены
+  const K = await login(8003, 'Удаляемый подрядчик'); await K.call('acceptTerms');
+  await ok('saveContractor K', K.call('saveContractor', { ...cp, name: 'Удаляемая Мария' }));
+  const ksh = await ok('createShift K', K.call('createShift', { ...sp, title: 'Смена удаляемого', date: day(3) }, key()));
+  await ok('apply W2→K', W2.call('apply', ksh.id));
+  await ok('deleteAccount K', K.call('deleteAccount'));
+  await ok('смены K отменены', A.call('adminShifts'), (b) => b.find((s) => s.id === ksh.id).status === 'cancelled');
+  await ok('исполнитель уведомлён об отмене', W2.call('notifications'), (b) => b.some((n) => n.type === 'shift_cancelled' && /Смена удаляемого/.test(n.text)));
+  await no('админа удалить нельзя', A.call('deleteAccount'), 'forbidden');
+
+  // длина полей: слишком длинный текст — понятная ошибка, а не 500
+  await no('слишком длинное «о себе»', W1.call('saveWorker', { ...wp, about: 'я'.repeat(1001) }), 'invalid');
+  await no('слишком длинное название смены', C.call('createShift', { ...sp, title: 'н'.repeat(101) }, key()), 'invalid');
+
+  // лимиты: жалоб не больше 10 в час (в тесте множитель ×10 → 100)
+  const R = await login(8004, 'Спамер'); await R.call('saveWorker', wp);
+  let limited = 0; for (let i = 0; i < 104; i++) { const r = await R.call('report', { target_type: 'shift', target_id: S3.id, reason: 'проверка лимита ' + i }); if (r.status === 429) limited++; }
+  check('лимит жалоб: после лимита приходит 429', limited === 4, 'получено 429: ' + limited);
+
+  // заголовки безопасности, юридические страницы, публичный конфиг, закрытость исходников
+  const page = await fetch(ROOT + '/');
+  check('CSP на главной', /default-src 'self'/.test(page.headers.get('content-security-policy') || ''));
+  check('nosniff на главной', page.headers.get('x-content-type-options') === 'nosniff');
+  check('CSP разрешает карту и подсказки, но не eval', /tiles\.openfreemap\.org/.test(page.headers.get('content-security-policy')) && !/unsafe-eval/.test(page.headers.get('content-security-policy')));
+  const priv = await (await fetch(ROOT + '/legal/privacy.html')).text();
+  check('политика: оператор подставлен', priv.includes('ООО Тестовый оператор') && priv.includes('help@example.test') && !priv.includes('{{'));
+  const cfg = await (await fetch(BASE + '/config')).json();
+  check('конфиг: ссылка поддержки', cfg.support_url === 'https://t.me/test_support');
+  const leak = await (await fetch(ROOT + '/server/server.js')).text();
+  check('исходники сервера не раздаются', !leak.includes("from 'node:http'"));
+  const leak2 = await (await fetch(ROOT + '/server/.env')).text();
+  check('.env не раздаётся', !leak2.includes('JWT_SECRET'));
+  const bad = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake.token.value' }, body: '{"fn":"me"}' });
+  check('поддельный токен отклоняется', bad.status === 401);
+  const forged = await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id: 1, first_name: 'Хакер' }).replace(/hash=[0-9a-f]+/, 'hash=' + '0'.repeat(64)) }) });
+  check('подделанные данные Telegram отклоняются', forged.status === 401);
+
+  assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
+  console.log(`Проверок пройдено: ${pass}`);
+});
+
