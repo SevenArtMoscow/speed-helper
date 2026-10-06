@@ -143,7 +143,7 @@ PROXY='    proxy_pass http://127.0.0.1:3000;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 35s;'
 GZIP='  gzip on;
-  gzip_types text/css application/javascript application/json image/svg+xml text/html;
+  gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
   gzip_min_length 512;'
 CERT="/etc/letsencrypt/live/$DOMAIN"
 if [ -f "$CERT/fullchain.pem" ]; then
