@@ -2,7 +2,7 @@
 import { api, track, MODE, devUsers, setDevUser, tg } from './api.js';
 import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON } from './ui.js';
 import { createMap, placemark, radiusCircle, shiftsLayer, pickLocation, routeLink } from './maps.js';
 import { esc, dateLabel, money, kmLabel, plural, phone10, fmtPhone } from './util.js';
 import { reportSheet, shiftName } from './screens-common.js';
@@ -277,10 +277,11 @@ async function fav(ctx) {
 async function contractorPage(ctx, id) {
   id = Number(id);
   const P = await api.contractorPage(id), c = P.contractor;
-  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep">⚑</button>')}<div class="card row">${avatar(c.avatar, c.name, 'lg')}<div class="grow"><b>${esc(c.name)}</b>${c.company ? `<div class="mut sm">${esc(c.company)}</div>` : ''}<div>${stars(c.rating, c.reviews)}</div><div class="mut sm">${c.shifts_done} ${plural(c.shifts_done, 'проведённая смена', 'проведённые смены', 'проведённых смен')}</div>${verifiedTag(c.verified, 'Проверенный подрядчик')}</div></div>
-    ${c.about ? `<p>${esc(c.about)}</p>` : ''}<button class="btn block ${P.is_fav ? '' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
-    <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click" data-act="open" data-id="${s.id}"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))} · ${money(s.pay)}</div></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
-    ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card"><div class="star">${'★'.repeat(r.stars)}</div>${r.text ? `<div>${esc(r.text)}</div>` : ''}<div class="mut sm">${esc(r.from_name || '')}</div></div>`).join('')}` : ''}`);
+  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
+      stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
+    ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}<button class="btn block ${P.is_fav ? 'favon' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
+    <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${money(s.pay)}</span></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
+    ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card review"><div class="row sp"><span class="star">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="mut sm">${esc(r.from_name || '')}</span></div>${r.text ? `<div style="margin-top:6px">${esc(r.text)}</div>` : ''}</div>`).join('')}` : ''}`);
   ctx.acts.fav = async () => { const on = await api.toggleFav(id); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); contractorPage(ctx, id); };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.rep = () => reportSheet('contractor', id);
@@ -288,22 +289,26 @@ async function contractorPage(ctx, id) {
 
 // ---------- профиль исполнителя ----------
 export function profileBlock(w, own) {
-  const rows = [['Возраст', w.age && `${w.age}`], ['Город', w.city], ['Опыт', w.experience], ['Навыки', (w.skills || []).length && w.skills.join(', ')], ['Права', (w.license || []).length && 'Категории ' + w.license.join(', ')],
-    ['Медкнижка', w.medbook && 'Есть'], ['Самозанятость', w.selfemployed && 'Да'], ['Ночные смены', w.night && 'Готов'], ['Инструмент', w.tools && 'Умеет работать']].filter(([, v]) => v);
-  return `<div class="card row">${avatar(w.avatar, w.name, 'lg')}<div class="grow"><h1 style="margin:0">${esc(w.name)}</h1><div>${stars(w.rating, w.reviews)}</div><div class="mut sm">${w.shifts_done} ${plural(w.shifts_done, 'завершённая смена', 'завершённые смены', 'завершённых смен')}</div>${verifiedTag(w.verified, 'Проверенный исполнитель')}</div></div>
-    ${w.about ? `<p>${esc(w.about)}</p>` : ''}${rows.length ? `<div class="card">${rows.map(([k, v]) => `<div class="row sp sm" style="margin:6px 0"><span class="mut">${k}</span><span style="text-align:right">${esc(v)}</span></div>`).join('')}</div>` : ''}${phone10(w.phone) ? `<div class="card row sp"><span class="mut">Телефон</span><a class="g" href="tel:+7${phone10(w.phone)}">${esc(fmtPhone(w.phone))}</a></div>` : ''}`;
+  const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + w.license.join(', ')]].filter(([, , v]) => v);
+  const feats = [w.medbook && pill('heart', 'Медкнижка'), w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
+  const skills = (w.skills || []).map((s) => `<span class="pill plain">${esc(s)}</span>`);
+  return heroCard({ av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
+      stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
+    + (w.about ? `<div class="about">${esc(w.about)}</div>` : '') + infoRows(rows)
+    + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')
+    + (phone10(w.phone) ? `<a class="callbtn" href="tel:+7${phone10(w.phone)}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>Позвонить</small></a>` : '');
 }
 async function profile(ctx) {
-  const u = await refreshMe(); const w = u.worker;
-  ctx.render(`<h1>Профиль</h1>${profileBlock(w, true)}
-    <div class="card"><div class="row sp"><b>Профиль заполнен на ${w.percent}%</b>${w.percent >= CONFIG.MIN_VERIFIED_PERCENT ? '<span class="tag g">✓</span>' : ''}</div><div class="bar" style="margin:8px 0"><i style="width:${w.percent}%"></i></div>
-    ${w.percent < 100 ? `<p class="mut sm" style="margin:0">Заполните профиль полностью: больше доверия подрядчиков, больше приглашений, выше позиция в поиске${w.percent < CONFIG.MIN_VERIFIED_PERCENT ? ` и статус «Проверенный исполнитель» (от ${CONFIG.MIN_VERIFIED_PERCENT}%)` : ''}.</p>` : ''}</div>
-    <button class="btn block" data-act="edit">Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}`);
+  const u = await refreshMe(); const w = u.worker, ok = w.percent >= CONFIG.MIN_VERIFIED_PERCENT;
+  ctx.render(`${profileBlock(w, true)}
+    <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
+    ${w.percent < 100 ? `<p class="mut sm" style="margin:12px 0 0">Чем полнее профиль, тем больше доверия подрядчиков и выше позиция в поиске.</p>` : ''}</div>
+    <button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}`);
   bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/w/edit');
 }
 export function roleSwitch() {
   const other = S.role === 'worker' ? 'contractor' : 'worker';
-  return `<button class="btn block ghost" data-act="switch">${other === 'contractor' ? 'Режим подрядчика' : 'Режим исполнителя'}${S.user.roles.includes(other) ? '' : ' (создать профиль)'}</button>`;
+  return `<button class="btn block ghost" data-act="switch">${ICON.swap}${other === 'contractor' ? 'Режим подрядчика' : 'Режим исполнителя'}${S.user.roles.includes(other) ? '' : ' (создать профиль)'}</button>`;
 }
 export function devPanel(u) {
   if (MODE !== 'local') return u.is_admin ? '<div style="height:8px"></div><button class="btn block ghost" data-act="admin">Админ-панель</button>' : '';

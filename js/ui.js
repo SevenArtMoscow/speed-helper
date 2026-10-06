@@ -16,7 +16,34 @@ export const ICON = {
   home: svg('<path d="M3.5 10.5 12 4l8.5 6.5"/><path d="M5.5 9v11h4.5v-6h4v6h4.5V9"/>'),
   shifts: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h3M8 17h6"/>'),
   bell: svg('<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.8 1.8H4.2z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
+  pin: svg('<path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>'),
+  user: svg('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.5-3.6 3.4-5.6 7-5.6s6.5 2 7 5.6"/>'),
+  work: svg('<rect x="3.5" y="7.5" width="17" height="12.5" rx="2.8"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3.5 13.2h17"/>'),
+  car: svg('<path d="M4.5 16v-5l2.1-5h10.8l2.1 5v5"/><path d="M3.5 16h17M7.5 16v2.5M16.5 16v2.5M4.5 11h15"/>'),
+  heart: svg('<path d="M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0 1 12 7.2a4.2 4.2 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'),
+  moon: svg('<path d="M20 14.6A8 8 0 1 1 9.4 4a6.4 6.4 0 0 0 10.6 10.6z"/>'),
+  bolt: svg('<path d="M13 2.8 5 13.6h6l-1 7.6 8-10.8h-6z"/>'),
+  money: svg('<rect x="3" y="6.5" width="18" height="11" rx="3"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 12h.01M17.5 12h.01" stroke-width="2.4"/>'),
+  phone: svg('<path d="M5.2 4.5h3.3l1.6 4.2-2.1 1.5a11 11 0 0 0 5.6 5.6l1.5-2.1 4.2 1.6v3.3a1.6 1.6 0 0 1-1.7 1.6A15.5 15.5 0 0 1 3.6 6.2 1.6 1.6 0 0 1 5.2 4.5z"/>'),
+  edit: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
+  swap: svg('<path d="M7 7h12l-3-3M17 17H5l3 3"/>'),
+  shield: svg('<path d="M12 3.2 5 6v5.6c0 4.2 2.9 7.5 7 9.2 4.1-1.7 7-5 7-9.2V6z"/><path d="m9 12 2.2 2.2L15.2 10"/>'),
+  info: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01" stroke-width="2.4"/>'),
 };
+
+// ---------- карточки профиля ----------
+// Шапка: аватар в кольце, имя, теги, плитки статистики [[значение, подпись], …]
+export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false }) {
+  return `<div class="hero2"><div class="avring ${verified ? 'ok' : ''}">${avatar(av, name, 'xl')}</div><h1>${esc(name)}</h1>${sub ? `<div class="mut sm">${sub}</div>` : ''}
+    ${tags ? `<div class="row wrap gap ctr" style="margin-top:10px">${tags}</div>` : ''}
+    ${stats.length ? `<div class="stats3">${stats.map(([v, l]) => `<div class="st"><b>${v}</b><span>${l}</span></div>`).join('')}</div>` : ''}</div>`;
+}
+// Строка «иконка · подпись · значение»
+export const infoRows = (rows) => (rows.length ? `<div class="info">${rows.map(([ic, k, v]) => `<div class="irow"><span class="ico">${ICON[ic]}</span><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>` : '');
+export const pill = (ic, text) => `<span class="pill">${ICON[ic]}${text}</span>`;
+export const sect = (t) => `<div class="sect">${t}</div>`;
+// Кольцо прогресса с процентом внутри
+export const ring = (p, size = 64) => `<div class="ring" style="--p:${Math.max(0, Math.min(100, p))};--s:${size}px"><b>${Math.round(p)}%</b></div>`;
 export const logo = () => `<div class="logo">${BOLT}<span>SPEED HELPER</span></div>`;
 export const go = (hash) => { if (location.hash === hash) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = hash; };
 export const back = () => { if (history.length > 1) history.back(); else go(S.role === 'contractor' ? '#/c/home' : '#/w/search'); };
