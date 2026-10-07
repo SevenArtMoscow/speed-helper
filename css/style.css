@@ -212,3 +212,43 @@ a.g{text-decoration:none;font-weight:600}
 .row.sp>.tabsx{flex:1 1 auto;min-width:0}
 .row.sp>.btn.sm{flex:none}
 .tabsx .chip{padding:8px 12px}
+
+/* ===== новые возможности ===== */
+:root{--or:#ff9f1a}
+.or{color:var(--or)}
+.tag.o{background:rgba(255,159,26,.14);color:var(--or)}
+.m .who .rt{margin-left:6px;font-size:10px;padding:2px 7px;border-radius:999px;font-weight:700;letter-spacing:.2px;vertical-align:1px}
+.rt.owner{background:rgba(255,77,94,.15);color:var(--red)}.rt.senior{background:rgba(255,204,51,.15);color:var(--yel)}.rt.worker{background:rgba(57,255,106,.13);color:var(--g)}
+/* нижнее меню: центральная кнопка выступает над панелью */
+nav.tabs{overflow:visible}
+nav.tabs a.center{color:var(--txt)}
+nav.tabs a.center .ic{width:58px;height:58px;border-radius:20px;margin-top:-26px;background:linear-gradient(145deg,#4dff7e,#1fd150);color:#04140a;box-shadow:0 8px 22px rgba(57,255,106,.38),0 0 0 4px rgba(11,12,14,.95)}
+nav.tabs a.center .ic svg{width:27px;height:27px;filter:none;stroke-width:2.2}
+nav.tabs a.center.on .ic{background:linear-gradient(145deg,#6bffa0,#2ee866);box-shadow:0 8px 26px rgba(57,255,106,.55),0 0 0 4px rgba(11,12,14,.95)}
+nav.tabs a.center.on .ic svg{filter:none}
+nav.tabs a.center{font-weight:700;margin-top:0}
+nav.tabs a.center.on{color:var(--g)}
+/* плитки на главной подрядчика — нажимаются */
+button.stat{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;color:var(--mut);position:relative}
+button.stat:active{transform:scale(.97)}
+button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:22px;color:var(--mut)}
+.stat.o{background:linear-gradient(160deg,rgba(255,159,26,.12),transparent 60%),var(--card);border-color:rgba(255,159,26,.3)}.stat.o b{color:var(--or)}
+.chip.o{border-color:rgba(255,159,26,.45);color:var(--or)}.chip.o.on{background:rgba(255,159,26,.16);border-color:var(--or);color:var(--or)}
+/* кнопки под карточкой: ↺ ✕ закладка ✓ */
+.actions{gap:16px}
+.rb.save{width:46px;height:46px;font-size:18px;color:#7cc4ff;border-color:#7cc4ff}.rb.save svg{width:20px;height:20px}
+.rb.save.on{background:rgba(124,196,255,.18);box-shadow:0 0 14px rgba(124,196,255,.35)}
+.bm{background:none;border:0;color:var(--mut);padding:8px;cursor:pointer}.bm svg{width:22px;height:22px}.bm.on{color:#7cc4ff}.bm.on svg{fill:currentColor}
+/* переключатель «за смену / в час» */
+.seg{display:flex;gap:6px;margin:4px 0}.seg .chip{flex:1;justify-content:center;padding:10px 12px}
+.hint{font-size:12px;color:var(--mut);margin:4px 0 0}
+/* рейтинг исполнителей */
+.prize{background:linear-gradient(135deg,rgba(255,159,26,.16),rgba(57,255,106,.08));border:1px solid rgba(255,159,26,.35);border-radius:20px;padding:14px 16px;margin:8px 0 12px}
+.prize b{color:var(--or)}
+.lb{display:flex;align-items:center;gap:12px;padding:10px 12px;margin:6px 0;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:18px}
+.lb .rk{width:34px;text-align:center;font-weight:900;font-size:17px;color:var(--mut);flex:none}
+.lb.p1 .rk,.lb.p2 .rk,.lb.p3 .rk{font-size:24px}
+.lb.p1{border-color:rgba(255,204,51,.55);background:linear-gradient(120deg,rgba(255,204,51,.12),var(--card))}.lb.p2{border-color:rgba(190,200,215,.45)}.lb.p3{border-color:rgba(205,127,50,.5)}
+.lb .sc{margin-left:auto;text-align:right;flex:none}.lb .sc b{display:block;font-size:18px;color:var(--g)}.lb .sc span{font-size:11px;color:var(--mut)}
+.lb.me{border-color:var(--g);box-shadow:0 0 0 1px rgba(57,255,106,.4)}
+.topbtn svg{width:24px;height:24px;color:var(--or)}

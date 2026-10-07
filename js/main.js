@@ -36,14 +36,15 @@ const ctx = { main: null, acts: {}, poll: null, cleanup: null,
   render(html, { full = false } = {}) { this.main.className = full ? 'nopad' : ''; this.main.style.overflow = full ? 'hidden' : ''; this.main.innerHTML = html; } };
 export { ctx };
 
+// В центре — главное действие (как в TikTok): у исполнителя «Найти», у подрядчика «Опубликовать»
 const TABS = {
-  worker: [['#/w/search', 'search', 'Поиск'], ['#/w/mine', 'mine', 'Мои смены'], ['#/chats', 'chats', 'Чаты'], ['#/w/fav', 'fav', 'Избранное'], ['#/w/profile', 'profile', 'Профиль']],
-  contractor: [['#/c/home', 'home', 'Главная'], ['#/c/shifts', 'shifts', 'Смены'], ['#/chats', 'chats', 'Чаты'], ['#/c/fav', 'fav', 'Избранное'], ['#/c/profile', 'profile', 'Профиль']],
+  worker: [['#/w/mine', 'mine', 'Мои смены'], ['#/w/fav', 'fav', 'Избранное'], ['#/w/search', 'search', 'Найти', true], ['#/chats', 'chats', 'Чаты'], ['#/w/profile', 'profile', 'Профиль']],
+  contractor: [['#/c/home', 'home', 'Главная'], ['#/c/shifts', 'shifts', 'Смены'], ['#/c/create', 'plus', 'Опубликовать', true], ['#/chats', 'chats', 'Чаты'], ['#/c/profile', 'profile', 'Профиль']],
 };
 
 function shell() {
   app.innerHTML = `${MODE === 'local' ? '<div class="banner">Локальный режим: данные хранятся только в этом браузере</div>' : ''}
-    <div class="top">${logo()}<div class="sp"></div><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
+    <div class="top">${logo()}<div class="sp"></div><button class="iconbtn topbtn" data-act="top" id="topbtn" aria-label="Рейтинг исполнителей" hidden>${ICON.trophy}</button><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
     <main id="main"></main><nav class="tabs" id="tabs" hidden></nav>`;
   ctx.main = $('#main');
   app.addEventListener('click', async (e) => {
@@ -52,6 +53,7 @@ function shell() {
     if (el.tagName === 'A') e.preventDefault(); // ссылки-действия href="#" не должны уводить на главную
     if (name === 'back') return back();
     if (name === 'bell') return go('#/notifications');
+    if (name === 'top') return go('#/w/top');
     const fn = ctx.acts[name]; if (!fn) return;
     el.dataset.busy = '1'; // защита от повторных нажатий
     try { await fn(el, e); } catch (err) { console.error(err); toast(errMsg(err), 'err'); } finally { delete el.dataset.busy; }
@@ -60,10 +62,11 @@ function shell() {
 
 export function renderTabs(hash) {
   const t = $('#tabs'), tabs = TABS[S.role];
-  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; return; }
+  const tb = $('#topbtn'); if (tb) tb.hidden = S.role !== 'worker';
+  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
   t.hidden = false;
   const unread = S.user ? S.user.unread : 0;
-  t.innerHTML = tabs.map(([h, ic, l]) => `<a href="${h}" class="${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
+  t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
 }
 
 let navToken = 0;

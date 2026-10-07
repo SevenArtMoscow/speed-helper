@@ -83,7 +83,8 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('feed завтра', W1.call('feed', { date: 'tomorrow' }), (b) => b.items.every((s) => s.date === day(1)));
   await ok('feed мин. оплата', W1.call('feed', { min_pay: 4000 }), (b) => b.items.length === 1);
   await ok('feed категория', W1.call('feed', { categories: [cats[1].id] }), (b) => b.items.length === 1);
-  await ok('feed радиус 1км от другого места', W1.call('feed', { lat: 59.93, lng: 30.31, radius_km: 1 }), (b) => b.items.length === 0);
+  await ok('feed: регион «область» — смен нет (все в Москве)', W1.call('feed', { geo: 'mo' }), (b) => b.items.length === 0);
+  await ok('feed: регион «Москва»', W1.call('feed', { geo: 'msk' }), (b) => b.items.length === 3);
   await ok('feed подрядчик не видит своих', C.call('feed', {}), (b) => !b.items.some((s) => s.contractor_id === C.id));
   await ok('getShift', W1.call('getShift', S1.id), (b) => b.title === sp.title);
   await no('getShift несуществующей', W1.call('getShift', 99999), 'not_found');
@@ -307,6 +308,62 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('QA: no-show не в «проведено смен»', C.call('workerPage', W1.id), (b) => b.worker.shifts_done === 0);
   await ok('QA: отметка «пришёл»', C.call('setAttendance', S1.id, W1.id, true));
   await ok('QA: пришёл — снова считается', C.call('workerPage', W1.id), (b) => b.worker.shifts_done === 1);
+
+  // ===== новые возможности =====
+  // оплата в час, «до выполнения задачи», регион
+  await no('NEW: вне Москвы и МО', C.call('createShift', { ...sp, lat: 59.93, lng: 30.31 }, key()), 'invalid');
+  await no('NEW: без окончания и без «до выполнения»', C.call('createShift', { ...sp, end: '' }, key()), 'invalid');
+  await no('NEW: неверный тип оплаты', C.call('createShift', { ...sp, pay_type: 'week' }, key()), 'invalid');
+  const HS = await ok('NEW: смена с почасовой оплатой «до выполнения»', C.call('createShift', { ...sp, title: 'Почасовая работа', pay: 500, pay_type: 'hour', until_done: true, end: '', date: day(5), lat: 55.9, lng: 37.0, region: 'mo' }, key()),
+    (b) => b.pay_type === 'hour' && b.until_done === true && b.region === 'mo' && b.total === 4000);
+  await ok('NEW: фильтр «область» находит смену', W3.call('feed', { geo: 'mo' }), (b) => b.items.length === 1 && b.items[0].id === HS.id);
+  await ok('NEW: фильтр «Москва» её не показывает', W3.call('feed', { geo: 'msk' }), (b) => !b.items.some((x) => x.id === HS.id));
+  await ok('NEW: мин. оплата сравнивается с суммой за смену (500×8=4000)', W3.call('feed', { geo: 'mo', min_pay: 3500 }), (b) => b.items.some((x) => x.id === HS.id));
+  await ok('NEW: мин. оплата выше суммы — не показывается', W3.call('feed', { geo: 'mo', min_pay: 4500 }), (b) => !b.items.some((x) => x.id === HS.id));
+  await ok('NEW: правка типа оплаты', C.call('updateShift', HS.id, { pay_type: 'shift', pay: 3000 }), (b) => b.pay_type === 'shift' && b.total === 3000);
+  // отложенные смены
+  await ok('NEW: отложить смену', W3.call('toggleShiftFav', HS.id), (b) => b === true);
+  await ok('NEW: отложенная — в списке', W3.call('savedShifts'), (b) => b.length === 1 && b[0].id === HS.id && b[0].saved === true);
+  await ok('NEW: отложенная — не в ленте', W3.call('feed', {}), (b) => !b.items.some((x) => x.id === HS.id));
+  await ok('NEW: include_saved возвращает её в ленту', W3.call('feed', { include_saved: true }), (b) => b.items.some((x) => x.id === HS.id));
+  await ok('NEW: убрать из отложенных', W3.call('toggleShiftFav', HS.id), (b) => b === false);
+  await ok('NEW: снова отложить', W3.call('toggleShiftFav', HS.id));
+  await ok('NEW: отклик снимает закладку', W3.call('apply', HS.id));
+  await ok('NEW: закладки нет после отклика', W3.call('savedShifts'), (b) => b.length === 0);
+  await no('NEW: отложить несуществующую', W3.call('toggleShiftFav', 99999), 'not_found');
+  // чаты по роли: у C две роли (подрядчик и исполнитель)
+  await ok('NEW: диалоги подрядчика C', C.call('myDialogs', 'contractor'), (b) => b.length >= 1 && b.every((d) => d.info.shift.contractor_id === C.id));
+  await ok('NEW: диалоги C как исполнителя — своих смен нет', C.call('myDialogs', 'worker'), (b) => b.every((d) => d.info.shift.contractor_id !== C.id));
+  // права админа чата: старший с «работа с откликами» получает уведомления и может принимать
+  const AS = await ok('NEW: смена для проверки админа чата', C.call('createShift', { ...sp, title: 'Смена с админом чата', date: day(6), people: 3 }, key()));
+  const w1ap = await ok('NEW: W1 откликается', W1.call('apply', AS.id));
+  await ok('NEW: W1 принят', C.call('decide', w1ap.id, 'accepted'));
+  await ok('NEW: W1 — админ чата (работа с откликами)', C.call('setSenior', AS.id, W1.id, ['applications']), (b) => b.role === 'senior');
+  const asap = await ok('NEW: W2 откликается', W2.call('apply', AS.id));
+  await ok('NEW: админ чата получил уведомление об отклике', W1.call('notifications'), (b) => b.some((n) => n.type === 'new_application' && n.link === '#/c/shift/' + AS.id));
+  await ok('NEW: админ чата видит отклики', W1.call('applicants', AS.id), (b) => b.length === 2);
+  await ok('NEW: админ чата принимает за подрядчика', W1.call('decide', asap.id, 'accepted'), (b) => b.status === 'accepted');
+  await no('NEW: админ чата не может отменить смену', W1.call('cancelShift', AS.id), 'forbidden');
+  // профиль: активные задания
+  await ok('NEW: подрядчик видит активные задания исполнителя', C.call('workerPage', W2.id), (b) => b.active_count === 1 && b.active.length === 1 && b.active[0].id === AS.id);
+  await ok('NEW: посторонний видит только число', C2.call('workerPage', W2.id), (b) => b.active_count === 1 && b.active.length === 0);
+  await ok('NEW: свои активные задания видны', W2.call('workerPage', W2.id), (b) => b.active.length === 1);
+  await ok('NEW: мои исполнители', C.call('myWorkers'), (b) => b.some((x) => x.user_id === W2.id) && b.every((x) => 'together' in x));
+  // необязательные отзывы
+  await ok('NEW: завершаем смену с админом чата', C.call('completeShift', AS.id));
+  await ok('NEW: есть неоценённые', W2.call('pendingReviews'), (b) => b.some((x) => x.shift.id === AS.id));
+  await ok('NEW: пропустить отзыв', W2.call('skipReview', AS.id));
+  await ok('NEW: пропущенный не просится', W2.call('pendingReviews'), (b) => !b.some((x) => x.shift.id === AS.id));
+  await ok('NEW: подрядчику по этой смене просятся два отзыва', C.call('pendingReviews'), (b) => b.filter((x) => x.shift.id === AS.id).length === 2);
+  await ok('NEW: пропуск одного исполнителя', C.call('skipReview', AS.id, W2.id));
+  await ok('NEW: остался один', C.call('pendingReviews'), (b) => b.filter((x) => x.shift.id === AS.id).length === 1);
+  await ok('NEW: пропуск всех по смене', C.call('skipReview', AS.id));
+  await ok('NEW: отзывов не осталось', C.call('pendingReviews'), (b) => !b.some((x) => x.shift.id === AS.id));
+  // рейтинг исполнителей
+  await ok('NEW: рейтинг: месяц', W1.call('leaderboard', 'month'), (b) => b.period === 'month' && Array.isArray(b.top) && b.top.length >= 1 && b.top[0].rank === 1 && b.participants >= 1);
+  await ok('NEW: рейтинг: за всё время содержит W1 с очками', W1.call('leaderboard', 'all'), (b) => b.me && b.me.score >= 10 && b.top.some((x) => x.user_id === W1.id));
+  await ok('NEW: рейтинг: у нового исполнителя нет места', X.call('leaderboard', 'all'), (b) => b.me === null);
+  await ok('NEW: рейтинг упорядочен по очкам', W1.call('leaderboard', 'all'), (b) => b.top.every((x, i) => i === 0 || b.top[i - 1].score >= x.score));
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

@@ -1,8 +1,8 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, ICON } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
-import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone } from './util.js';
+import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
 import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock } from './screens-worker.js';
 
@@ -10,35 +10,45 @@ const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
 
 const shiftRow = (s, extra = '') => `<div class="card click" data-act="open" data-id="${s.id}"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div>
-  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)} · ${money(s.pay)}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
+  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
 
 async function home(ctx) {
   if (need()) return go('#/c/onboard');
   const load = async () => {
     const [st, list] = await Promise.all([api.contractorStats(), api.myShifts()]);
     const act = list.filter((s) => ['open', 'full'].includes(s.status)).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
-    const html = `<h1>Главная</h1><div class="grid2" style="margin:10px 0"><div class="stat"><b>${st.active}</b>Активные смены</div><div class="stat"><b>${st.new_applications}</b>Новые отклики</div><div class="stat"><b>${st.workers}</b>Исполнители</div><div class="stat"><b>${st.done}</b>Завершённые</div></div>
-      <button class="btn pri block" data-act="create" style="padding:15px">＋ Создать смену</button>
-      <h2>Ближайшие смены</h2>${act.length ? act.slice(0, 20).map((s) => shiftRow(s)).join('') : `<div class="empty"><h2>У вас пока нет открытых смен.</h2></div>`}`;
+    const html = `<h1>Главная</h1><div class="grid2" style="margin:10px 0"><button class="stat" data-act="go" data-to="#/c/shifts"><b>${st.active}</b>Активные смены</button><button class="stat" data-act="go" data-to="#/c/shifts/new"><b>${st.new_applications}</b>Новые отклики</button><button class="stat" data-act="go" data-to="#/c/workers"><b>${st.workers}</b>Исполнители</button><button class="stat o" data-act="go" data-to="#/c/shifts/done"><b>${st.done}</b>Завершённые</button></div>
+      <button class="btn pri block" data-act="create" style="padding:15px">＋ Опубликовать смену</button>
+      <button class="btn block" data-act="go" data-to="#/c/fav" style="margin-top:8px">★ Избранные исполнители</button>
+      <h2>Открытые смены</h2>${act.length ? act.slice(0, 20).map((s) => shiftRow(s)).join('') : `<div class="empty"><h2>У вас пока нет открытых смен.</h2></div>`}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
   ctx.main.dataset.h = ''; await load(); ctx.poll = load;
-  ctx.acts.create = () => go('#/c/create'); ctx.acts.open = (el) => go('#/c/shift/' + el.dataset.id);
+  ctx.acts.create = () => go('#/c/create'); ctx.acts.open = (el) => go('#/c/shift/' + el.dataset.id); ctx.acts.go = (el) => go(el.dataset.to);
 }
 
-async function shifts(ctx) {
+async function shifts(ctx, mode) {
   if (need()) return go('#/c/onboard');
-  let tab = 'act';
-  const T = [['act', 'Активные', ['open', 'full']], ['done', 'Завершённые', ['completed']], ['off', 'Отменённые', ['cancelled']]];
+  let tab = mode === 'new' ? 'new' : mode === 'done' ? 'done' : 'act';
+  const ACT = ['open', 'full'];
+  const T = [['act', 'Активные', (s) => ACT.includes(s.status)], ['new', 'Новые отклики', (s) => ACT.includes(s.status) && s.pending_count > 0], ['done', 'Завершённые', (s) => s.status === 'completed', 'o'], ['off', 'Отменённые', (s) => s.status === 'cancelled']];
   let list = [];
   const draw = () => {
-    const cur = T.find((t) => t[0] === tab), l = list.filter((s) => cur[2].includes(s.status));
-    const html = `<div class="row sp"><h1>Смены</h1><button class="btn pri sm" data-act="create">＋ Создать</button></div><div class="tabsx">${T.map(([k, t, st]) => `<span class="chip ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t} · ${list.filter((s) => st.includes(s.status)).length}</span>`).join('')}</div>${l.length ? l.map((s) => shiftRow(s)).join('') : emptyState(tab === 'act' ? 'У вас пока нет открытых смен.' : 'Здесь пока пусто', '', tab === 'act' ? '<button class="btn pri" data-act="create">Создать смену</button>' : '')}`;
+    const cur = T.find((t) => t[0] === tab), l = list.filter(cur[2]);
+    const html = `<div class="row sp"><h1>Смены</h1><button class="btn pri sm" data-act="create">＋ Создать</button></div><div class="tabsx">${T.map(([k, t, f, c]) => `<span class="chip ${c || ''} ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t} · ${list.filter(f).length}</span>`).join('')}</div>${l.length ? l.map((s) => shiftRow(s)).join('') : emptyState(tab === 'act' ? 'У вас пока нет открытых смен.' : tab === 'new' ? 'Новых откликов нет' : 'Здесь пока пусто', '', tab === 'act' ? '<button class="btn pri" data-act="create">Создать смену</button>' : '')}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
   const load = async () => { list = await api.myShifts(); draw(); };
   ctx.main.dataset.h = ''; await load(); ctx.poll = load;
   ctx.acts.tab = (el) => { tab = el.dataset.t; draw(); }; ctx.acts.create = () => go('#/c/create'); ctx.acts.open = (el) => go('#/c/shift/' + el.dataset.id);
+}
+
+// ---------- мои исполнители ----------
+async function workers(ctx) {
+  if (need()) return go('#/c/onboard');
+  const list = await api.myWorkers();
+  ctx.render(`${pageHead('Мои исполнители')}<p class="mut sm">Люди, которых вы принимали на свои смены</p>${list.length ? list.map((w) => `<div class="card click row" data-act="p" data-id="${w.user_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.together} ${plural(w.together, 'смена', 'смены', 'смен')} с вами</div></div>›</div>`).join('') : emptyState('Пока никого', 'Исполнители появятся здесь после того, как вы примете отклики.')}`);
+  ctx.acts.p = (el) => go('#/c/worker/' + el.dataset.id);
 }
 
 // ---------- создание ----------
@@ -93,7 +103,7 @@ async function createOrEdit(ctx, id) {
   const old = editing ? await api.getShift(id) : null;
   if (old && old.contractor_id !== S.user.id) return go('#/c/home');
   const reqs = new Set(old ? old.requirements : []); const custom = (old ? old.requirements : []).filter((r) => !BASE_TAGS.includes(r));
-  let geo = old && old.lat != null ? { lat: old.lat, lng: old.lng } : null;
+  let geo = old && old.lat != null ? { lat: old.lat, lng: old.lng, region: old.region } : null;
   const reqId = uid(); // ключ идемпотентности: двойное нажатие «Создать» не создаст две смены
   const d = old || {};
   const lock = editing ? 'disabled' : '';
@@ -103,14 +113,31 @@ async function createOrEdit(ctx, id) {
     <label class="f">Описание</label><textarea class="i" id="desc" placeholder="Что нужно делать">${esc(d.description || '')}</textarea>
     <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Начните вводить адрес и выберите его из подсказок'}</div>
     <div class="grid2"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
-    <div class="grid2"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${esc(d.end || '18:00')}"></div></div>
-    <label class="f">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}">
+    <div class="grid2"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${d.until_done ? '' : esc(d.end || '18:00')}" ${d.until_done ? 'disabled' : ''}></div></div>
+    <div class="row sp" style="margin:10px 0"><span>До выполнения задачи<div class="mut sm">Без точного времени окончания: работаем, пока задача не сделана</div></span>${toggle(!!d.until_done, 'ud', 'id="ud"')}</div>
+    <label class="f">Как платите</label><div class="seg" id="pt"><span class="chip" data-act="pt" data-v="shift">За смену</span><span class="chip" data-act="pt" data-v="hour">В час</span></div>
+    <label class="f" id="paylbl">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}"><p class="hint" id="payhint"></p>
     <label class="f">Требования</label><div class="row wrap gap" id="reqs"></div>
     ${editing ? '' : `<div class="row sp" style="margin:14px 0"><span>Уведомить работников из избранного<div class="mut sm">Это не приглашение и не подтверждение</div></span>${toggle(false, 'tg', 'id="nf"')}</div>`}
     <button class="btn pri block" data-act="save" style="margin-top:14px">${editing ? 'Сохранить' : 'Опубликовать смену'}</button>`));
   const drawReqs = () => { document.getElementById('reqs').innerHTML = [...BASE_TAGS, ...custom].map((r) => `<span class="chip ${reqs.has(r) ? 'on' : ''}" data-act="req" data-r="${esc(r)}">${esc(r)}</span>`).join('') + '<span class="chip" data-act="addreq">＋ Своё</span>'; };
   drawReqs();
   const val = (i) => document.getElementById(i).value;
+  // оплата «за смену / в час» и «до выполнения задачи»
+  let ptype = d.pay_type || 'shift';
+  const ud = () => document.getElementById('ud').classList.contains('on');
+  const syncPay = () => {
+    document.querySelectorAll('#pt [data-v]').forEach((c) => c.classList.toggle('on', c.dataset.v === ptype));
+    document.getElementById('paylbl').innerHTML = ptype === 'hour' ? 'Ставка за час, ₽ <span class="req">*</span>' : 'Оплата за смену, ₽ <span class="req">*</span>';
+    const end = document.getElementById('end'), on = ud(); end.disabled = on; if (on) end.value = ''; else if (!end.value) end.value = '18:00';
+    const pay = Number(val('pay')); let h = 8;
+    if (!on && val('start') && val('end')) { const [a, b] = [val('start'), val('end')].map((t) => { const [x, y] = t.split(':'); return +x * 60 + +y; }); h = ((b - a + 1440) % 1440) / 60 || 1; }
+    document.getElementById('payhint').textContent = ptype === 'hour' && pay > 0 ? `≈ ${money(Math.round(pay * h))} за ${on ? '8 часов' : Math.round(h * 10) / 10 + ' ч'}` : '';
+  };
+  ['pay', 'start', 'end'].forEach((i) => document.getElementById(i).addEventListener('input', syncPay));
+  ctx.acts.pt = (el) => { ptype = el.dataset.v; syncPay(); };
+  ctx.acts.ud = (el) => { el.classList.toggle('on'); el.setAttribute('aria-checked', el.classList.contains('on')); syncPay(); };
+  syncPay();
   ctx.acts.req = (el) => { const r = el.dataset.r; reqs.has(r) ? reqs.delete(r) : reqs.add(r); drawReqs(); }; // повторное нажатие отключает тег
   ctx.acts.tg = (el) => el.classList.toggle('on');
   ctx.acts.addreq = () => {
@@ -126,7 +153,7 @@ async function createOrEdit(ctx, id) {
   const addrEl = document.getElementById('addr');
   let geoFor = geo ? addrEl.value : null, checkSeq = 0; // для какого текста адреса найдена точка
   const geoInfo = (t, cls) => { const el = document.getElementById('geo'); if (el) { el.className = 'sm ' + cls; el.textContent = t; } };
-  const setGeo = (p, address, text) => { geo = { lat: p.lat, lng: p.lng }; if (address) addrEl.value = address; geoFor = addrEl.value; geoInfo(text, 'g'); };
+  const setGeo = (p, address, text) => { geo = { lat: p.lat, lng: p.lng, region: p.region }; if (address) addrEl.value = address; geoFor = addrEl.value; geoInfo(text, 'g'); };
   const checkAddr = async () => {
     const q = addrEl.value.trim(), my = ++checkSeq;
     if (geo && q === geoFor) return true;
@@ -135,6 +162,7 @@ async function createOrEdit(ctx, id) {
     let g; try { g = await geocode(q); } catch (e) { geoInfo('Не удалось проверить адрес: ' + e.message + '. Укажите точку 📍', 'r'); return false; }
     if (my !== checkSeq) return !!geo; // пока проверяли, адрес изменили
     if (!g) { geoInfo('✗ Такой адрес не найден. Проверьте город, улицу и дом или укажите точку 📍', 'r'); return false; }
+    if (!g.region) { geoInfo('✗ Мы работаем только в Москве и Московской области', 'r'); return false; }
     if (!g.house) { geoInfo(`⚠ Не хватает номера дома: «${g.address}». Выберите дом из подсказок или поставьте точку 📍`, 'y'); return false; }
     if (!g.ok) { geoInfo(`⚠ Дом найден, но без координат: «${g.address}». Поставьте точку на карте 📍`, 'y'); return false; }
     setGeo(g, g.address, '✓ Адрес найден'); return true;
@@ -164,14 +192,14 @@ async function createOrEdit(ctx, id) {
     return [
       [$('people'), Number.isInteger(ppl) && ppl >= 1 && ppl <= 500, 'Сколько людей нужно (1–500)'],
       [$('start'), !!val('start'), 'Укажите время начала'],
-      [$('end'), !!val('end') && val('end') !== val('start'), val('end') ? 'Окончание совпадает с началом' : 'Укажите время окончания'],
+      [$('end'), ud() || (!!val('end') && val('end') !== val('start')), val('end') ? 'Окончание совпадает с началом' : 'Укажите время окончания или «до выполнения задачи»'],
       [$('pay'), Number.isInteger(pay) && pay >= 1 && pay <= 1000000, pay > 1000000 ? 'Слишком большая сумма (до 1 000 000 ₽)' : 'Укажите оплату за смену в рублях'],
     ];
   };
   ctx.acts.save = async () => {
     if (editing) {
       if (!validate(timeChecks())) return;
-      await api.updateShift(id, { pay: val('pay'), people: val('people'), start: val('start'), end: val('end'), description: val('desc').trim(), requirements: [...reqs] });
+      await api.updateShift(id, { pay: val('pay'), pay_type: ptype, until_done: ud(), people: val('people'), start: val('start'), end: val('end'), description: val('desc').trim(), requirements: [...reqs] });
       toast('Смена обновлена', 'ok'); return go('#/c/shift/' + id);
     }
     const addrOk = await checkAddr();
@@ -182,7 +210,7 @@ async function createOrEdit(ctx, id) {
       [$('date'), !!val('date') && val('date') >= todayISO(), val('date') ? 'Дата уже прошла' : 'Укажите дату'],
       ...timeChecks(),
     ])) return;
-    const s = await api.createShift({ title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') }, reqId);
+    const s = await api.createShift({ title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), pay_type: ptype, until_done: ud(), region: geo.region, people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') }, reqId);
     track('shift_created', { id: s.id }); toast('Смена опубликована', 'ok'); go('#/c/shift/' + s.id);
   };
 }
@@ -192,12 +220,12 @@ async function shiftPage(ctx, id) {
   id = Number(id);
   const load = async () => {
     const [s, apps] = await Promise.all([api.getShift(id), api.applicants(id)]);
-    const active = ['open', 'full'].includes(s.status);
+    const active = ['open', 'full'].includes(s.status), owner = s.contractor_id === S.user.id;
     const groups = [['pending', 'Новые отклики'], ['accepted', 'Приняты'], ['completed', 'Участвовали'], ['rejected', 'Отклонены'], ['cancelled', 'Отказались / исключены']];
-    const html = `${pageHead('Смена')}<div class="card"><div class="row sp"><h2 style="margin:0">${esc(s.title)}</h2>${statusTag(s.status)}</div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)} · ${money(s.pay)}<br>${esc(s.address)}</div>
+    const html = `${pageHead('Смена')}<div class="card"><div class="row sp"><h2 style="margin:0">${esc(s.title)}</h2>${statusTag(s.status)}</div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}${payNote(s) ? ` (${esc(payNote(s))})` : ''}<br>${esc(s.address)}</div>
       <div class="row sp sm"><span>👥 ${s.accepted_count} / ${s.people}</span></div><div class="bar" style="margin:6px 0"><i style="width:${Math.min(100, (s.accepted_count / s.people) * 100)}%"></i></div>
       ${s.description ? `<p class="mut sm">${esc(s.description)}</p>` : ''}${(s.requirements || []).map((r) => `<span class="tag">${esc(r)}</span> `).join('')}
-      ${active ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button><button class="btn sm danger" data-act="cancel">Отменить</button></div>' : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
+      ${active ? (owner ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button><button class="btn sm danger" data-act="cancel">Отменить</button></div>' : '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда и чат</button></div><p class="mut sm">Вы — админ чата этой смены: можно принимать и отклонять отклики.</p>') : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
       <h2>Отклики · ${apps.length}</h2>${apps.length ? groups.map(([st, t]) => { const l = apps.filter((a) => a.status === st); return l.length ? `<div class="mut sm" style="margin:12px 0 4px">${t} · ${l.length}</div>` + l.map((a) => cand(a, active, s.status === 'open')).join('') : ''; }).join('') : '<p class="mut">Пока никто не откликнулся.</p>'}`;
     if (ctx.main.dataset.h !== html && !document.querySelector('.ov')) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
     ctx.shiftData = { s, apps };
@@ -228,7 +256,8 @@ async function shiftPage(ctx, id) {
 async function workerPage(ctx, wid) {
   wid = Number(wid);
   const P = await api.workerPage(wid), w = P.worker;
-  ctx.render(`${pageHead('Кандидат', '<button class="iconbtn" data-act="rep">⚑</button>')}${profileBlock(w)}
+  const activeBlock = P.active.length ? sect('Активные задания') + P.active.map((a) => `<div class="card"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>`).join('') + (P.active_count > P.active.length ? `<p class="mut sm">Всего активных заданий: ${P.active_count}</p>` : '') : P.active_count ? `<p class="mut sm">Сейчас занят на ${P.active_count} ${plural(P.active_count, 'смене', 'сменах', 'сменах')}</p>` : '';
+  ctx.render(`${pageHead('Кандидат', '<button class="iconbtn" data-act="rep">⚑</button>')}${profileBlock(w)}${activeBlock}
     <button class="btn block ${P.is_fav ? '' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
     ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card review"><div class="row sp"><span class="star">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="mut sm">${esc(r.from_name || '')}</span></div>${r.text ? `<div style="margin-top:6px">${esc(r.text)}</div>` : ''}</div>`).join('')}` : ''}`);
   ctx.acts.fav = async () => { const on = await api.toggleFav(wid); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); workerPage(ctx, wid); };
@@ -251,6 +280,6 @@ async function profile(ctx) {
 }
 
 export const contractorRoutes = [
-  [/^#\/c\/home$/, home], [/^#\/c\/shifts$/, shifts], [/^#\/c\/create$/, createOrEdit], [/^#\/c\/edit\/(\d+)$/, createOrEdit], [/^#\/c\/shift\/(\d+)$/, shiftPage],
+  [/^#\/c\/home$/, home], [/^#\/c\/shifts(?:\/(new|done))?$/, shifts], [/^#\/c\/workers$/, workers], [/^#\/c\/create$/, createOrEdit], [/^#\/c\/edit\/(\d+)$/, createOrEdit], [/^#\/c\/shift\/(\d+)$/, shiftPage],
   [/^#\/c\/worker\/(\d+)$/, workerPage], [/^#\/c\/fav$/, fav], [/^#\/c\/profile$/, profile],
 ];

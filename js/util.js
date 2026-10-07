@@ -26,6 +26,10 @@ export const dateLong = (iso) => { const [, m, d] = iso.split('-'); return `${Nu
 export function isWeekend(iso) { const w = new Date(iso + 'T00:00:00').getDay(); return w === 0 || w === 6; }
 
 export const money = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`;
+// время смены: «09:00–18:00» или «с 09:00 · до выполнения задачи»; оплата: «3 000 ₽» или «500 ₽/час»
+export const timeRange = (s) => (s.until_done ? `с ${s.start} · до выполнения задачи` : `${s.start}–${s.end}`);
+export const payLabel = (s) => (s.pay_type === 'hour' ? `${money(s.pay)}/час` : money(s.pay));
+export const payNote = (s) => (s.pay_type === 'hour' ? `≈ ${money(s.total)} за ${s.until_done ? '8 часов' : 'смену'}` : '');
 export const plural = (n, a, b, c) => { const k = Math.abs(n) % 100, l = k % 10; return k > 10 && k < 20 ? c : l > 1 && l < 5 ? b : l === 1 ? a : c; };
 
 export function dist(lat1, lon1, lat2, lon2) {

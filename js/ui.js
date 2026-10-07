@@ -28,6 +28,9 @@ export const ICON = {
   edit: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
   swap: svg('<path d="M7 7h12l-3-3M17 17H5l3 3"/>'),
   shield: svg('<path d="M12 3.2 5 6v5.6c0 4.2 2.9 7.5 7 9.2 4.1-1.7 7-5 7-9.2V6z"/><path d="m9 12 2.2 2.2L15.2 10"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14" stroke-width="2.6"/>'),
+  trophy: svg('<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v3M9 20h6M10 16h4l.5 4h-5z"/>'),
+  bookmark: svg('<path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/>'),
   info: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01" stroke-width="2.4"/>'),
 };
 
@@ -135,7 +138,7 @@ export function maskPhone(el) {
 }
 
 export const STATUS = {
-  pending: ['В ожидании', 'y'], accepted: ['Подтверждена', 'g'], rejected: ['Отклонена', 'r'], cancelled: ['Отменена', 'r'], completed: ['Завершена', ''],
+  pending: ['В ожидании', 'y'], accepted: ['Подтверждена', 'g'], rejected: ['Отклонена', 'r'], cancelled: ['Отменена', 'r'], completed: ['Завершена', 'o'],
   open: ['Открыта', 'g'], full: ['Набрана', 'y'],
 };
 export const statusTag = (st) => { const [t, c] = STATUS[st] || [st, '']; return `<span class="tag ${c}">${t}</span>`; };

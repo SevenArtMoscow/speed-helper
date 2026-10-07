@@ -79,6 +79,18 @@ export function radiusCircle(map, lat, lng, km) {
 export function shiftsLayer(map, items, onPick) {
   const features = items.filter((s) => s.lat != null).map((s) => ({ type: 'Feature', properties: { id: s.id, pay: Number(s.pay).toLocaleString('ru-RU') + ' р' /* в шрифте карты нет знака ₽ */ }, geometry: { type: 'Point', coordinates: [s.lng, s.lat] } }));
   map.addSource('shifts', { type: 'geojson', data: { type: 'FeatureCollection', features }, cluster: true, clusterRadius: 44, clusterMaxZoom: 15 });
+  // свечение: там, где есть работа, точки светятся и мягко пульсируют
+  map.addLayer({ id: 'cluster-glow', type: 'circle', source: 'shifts', filter: ['has', 'point_count'], paint: { 'circle-color': GREEN, 'circle-radius': 32, 'circle-opacity': 0.25, 'circle-blur': 0.9 } });
+  map.addLayer({ id: 'shift-glow', type: 'circle', source: 'shifts', filter: ['!', ['has', 'point_count']], paint: { 'circle-color': GREEN, 'circle-radius': 22, 'circle-opacity': 0.3, 'circle-blur': 1 } });
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let raf; const t0 = performance.now();
+    const pulse = () => {
+      const k = (Math.sin((performance.now() - t0) / 450) + 1) / 2;
+      try { map.setPaintProperty('shift-glow', 'circle-radius', 15 + k * 15); map.setPaintProperty('shift-glow', 'circle-opacity', 0.38 - k * 0.2); map.setPaintProperty('cluster-glow', 'circle-radius', 26 + k * 14); map.setPaintProperty('cluster-glow', 'circle-opacity', 0.32 - k * 0.15); } catch { return; }
+      raf = requestAnimationFrame(pulse);
+    };
+    pulse(); map.on('remove', () => cancelAnimationFrame(raf));
+  }
   map.addLayer({ id: 'clusters', type: 'circle', source: 'shifts', filter: ['has', 'point_count'], paint: { 'circle-color': GREEN, 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 20, 50, 26], 'circle-stroke-width': 4, 'circle-stroke-color': 'rgba(57,255,106,.25)' } });
   map.addLayer({ id: 'cluster-n', type: 'symbol', source: 'shifts', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 13 }, paint: { 'text-color': '#031407' } });
   map.addLayer({ id: 'shift-dot', type: 'circle', source: 'shifts', filter: ['!', ['has', 'point_count']], paint: { 'circle-color': GREEN, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': '#0b0c0e' } });
@@ -105,9 +117,12 @@ async function dadata(method, body) {
 }
 const strip = (v) => String(v || '').replace(/^Россия,\s*/, '');
 // Адрес существует с точностью до дома и у него есть координаты
-const toAddr = (s) => { const d = s.data || {}; const has = d.geo_lat != null && d.geo_lon != null; return { ok: !!d.house && has, house: !!d.house, lat: has ? +d.geo_lat : null, lng: has ? +d.geo_lon : null, address: strip(s.value) }; };
+// Работаем только в Москве и Московской области: 'msk' / 'mo' / null (вне зоны)
+const regionOf = (d) => { const c = d.region_iso_code || ''; if (c === 'RU-MOW') return 'msk'; if (c === 'RU-MOS') return 'mo'; const r = d.region || ''; return r === 'Москва' ? 'msk' : r === 'Московская' ? 'mo' : null; };
+const ZONE = [{ kladr_id: '7700000000000' }, { kladr_id: '5000000000000' }]; // подсказки только по Москве и области
+const toAddr = (s) => { const d = s.data || {}; const has = d.geo_lat != null && d.geo_lon != null; return { ok: !!d.house && has, house: !!d.house, lat: has ? +d.geo_lat : null, lng: has ? +d.geo_lon : null, address: strip(s.value), region: regionOf(d) }; };
 
-export const suggestAddress = async (query, count = 6) => (String(query || '').trim().length < 3 ? [] : (await dadata('suggest/address', { query: String(query).trim(), count })).map((s) => ({ ...toAddr(s), raw: s })));
+export const suggestAddress = async (query, count = 6) => (String(query || '').trim().length < 3 ? [] : (await dadata('suggest/address', { query: String(query).trim(), count, locations: ZONE })).map((s) => ({ ...toAddr(s), raw: s })));
 
 // Проверка введённого текста: {ok, lat, lng, address, house} лучшего совпадения или null, если такого адреса нет
 export async function geocode(query) {
@@ -118,7 +133,7 @@ export async function geocode(query) {
 // Адрес по точке на карте (ближайший дом)
 export async function reverseGeocode(lat, lng) {
   const [s] = await dadata('geolocate/address', { lat, lon: lng, count: 1, radius_meters: 100 });
-  return s ? strip(s.value) : null;
+  return s ? { address: strip(s.value), region: regionOf(s.data || {}) } : null;
 }
 
 // Подсказки под полем ввода. onPick({ok, lat, lng, address}) — выбран адрес с домом.
@@ -157,21 +172,25 @@ export function pickLocation({ lat, lng, query } = {}) {
       <div id="pmap" style="height:300px;margin:10px 0;border-radius:14px;overflow:hidden"></div><p class="mut sm" id="pinfo">Выберите адрес из подсказок или нажмите на карту, чтобы поставить точку</p>
       <button class="btn pri block" id="pok" disabled>Готово</button>`);
     const $ = (id) => s.el.querySelector('#' + id);
-    let cur = lat != null ? { lat, lng } : null, addr = '', ok = false, map = null, mk = null, done = false;
+    let cur = lat != null ? { lat, lng } : null, addr = '', ok = false, region = null, map = null, mk = null, done = false;
     const finish = (v) => { if (done) return; done = true; if (map) map.remove(); res(v); };
     const info = (t, cls = 'mut') => { $('pinfo').className = 'sm ' + cls; $('pinfo').textContent = t; };
-    const set = (p, a, exact) => {
-      cur = p; ok = !!exact; addr = a || '';
+    const set = (p, a, exact, reg) => {
+      cur = p; ok = !!exact; addr = a || ''; if (reg !== undefined) region = reg;
       if (map) { if (mk) mk.setLngLat([p.lng, p.lat]); else { mk = placemark(map, p.lat, p.lng, { draggable: true }); mk.on('dragend', () => { const q = mk.getLngLat(); fromPoint({ lat: q.lat, lng: q.lng }); }); } }
       $('pok').disabled = false;
       info(addr ? '📍 ' + addr : `Точка: ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`, addr ? 'g' : 'mut');
     };
     const fromPoint = async (p) => {
       set(p, null); info('Ищем адрес точки…');
-      try { const a = await reverseGeocode(p.lat, p.lng); if (a) { $('pq').value = a; set(p, a, true); } else info(`Точка: ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)} — рядом нет адреса`, 'y'); }
+      try {
+        const a = await reverseGeocode(p.lat, p.lng);
+        if (a && !a.region) { $('pok').disabled = true; return info('Это вне Москвы и Московской области — работаем только здесь. Выберите другую точку', 'r'); }
+        if (a) { $('pq').value = a.address; set(p, a.address, true, a.region); } else info(`Точка: ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)} — рядом нет адреса`, 'y');
+      }
       catch (e) { info(`Точка: ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)} (адрес не определён: ${e.message})`, 'y'); }
     };
-    const toAddrPoint = (g) => { if (g.lat == null) return info('У этого адреса нет координат — поставьте точку на карте', 'y'); map && map.flyTo({ center: [g.lng, g.lat], zoom: g.ok ? 17 : 14 }); set({ lat: g.lat, lng: g.lng }, g.address, g.ok); };
+    const toAddrPoint = (g) => { if (g.lat == null) return info('У этого адреса нет координат — поставьте точку на карте', 'y'); map && map.flyTo({ center: [g.lng, g.lat], zoom: g.ok ? 17 : 14 }); set({ lat: g.lat, lng: g.lng }, g.address, g.ok, g.region); };
     createMap($('pmap'), { center: cur ? [cur.lat, cur.lng] : null, zoom: cur ? 16 : 10 }).then((m) => {
       if (!m) return; map = m;
       if (cur) set(cur, query, !!query);
@@ -179,7 +198,7 @@ export function pickLocation({ lat, lng, query } = {}) {
     }).catch((e) => info(e.message, 'r'));
     attachSuggest($('pq'), toAddrPoint);
     $('pq').onkeydown = async (e) => { if (e.key !== 'Enter') return; try { const g = await geocode($('pq').value); if (g) toAddrPoint(g); else info('Адрес не найден', 'r'); } catch (er) { info(er.message, 'r'); } };
-    $('pok').onclick = () => { s.close(); finish({ ...cur, address: addr, ok }); };
+    $('pok').onclick = () => { s.close(); finish({ ...cur, address: addr, ok, region }); };
     s.el.parentElement.addEventListener('click', (e) => { if (e.target === s.el.parentElement) finish(null); });
   });
 }

@@ -154,7 +154,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = req.url.split('?')[0];
     if (url === '/api/health') { await pool.query('select 1'); return json(res, 200, { ok: true }); }
-    if (url === '/api/config') return json(res, 200, { support_url: env.SUPPORT_URL || '', version: VERSION });
+    if (url === '/api/config') return json(res, 200, { support_url: env.SUPPORT_URL || '', prizes: env.PRIZES_TEXT || '', version: VERSION });
     if (req.method === 'POST' && url === '/api/auth') return await auth(req, res);
     if (req.method === 'POST' && url === '/api/rpc') return await rpc(req, res);
     if (url.startsWith('/api/') && req.method !== 'POST' && req.method !== 'GET') return json(res, 405, { message: 'Method not allowed', hint: 'invalid' });

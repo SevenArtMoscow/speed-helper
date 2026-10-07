@@ -1,7 +1,7 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession, tg } from './api.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
-import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money } from './util.js';
+import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel } from './util.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
 export const shiftName = (s) => `${s.title} · ${dateLabel(s.date)}`;
@@ -138,10 +138,10 @@ async function notifications(ctx) {
 // ---------- список диалогов ----------
 async function chats(ctx) {
   const render = async () => {
-    const [dms, teams] = await Promise.all([api.myDialogs(), S.role === 'contractor' ? api.myShifts() : api.myTeams()]);
+    const [dms, teams] = await Promise.all([api.myDialogs(S.role), S.role === 'contractor' ? api.myShifts() : api.myTeams()]);
     const teamList = (S.role === 'contractor' ? teams.filter((s) => s.accepted_count > 0 && s.status !== 'cancelled') : teams);
     const html = `<h1>Чаты</h1><h2>Команды смен</h2>${teamList.length ? teamList.map((s) => `<div class="card click row" data-act="team" data-id="${s.id}"><div class="grow"><b>${esc(shiftName(s))}</b><div class="mut sm">${s.accepted_count} / ${s.people} чел.</div></div>›</div>`).join('') : '<p class="mut">Команда появится после принятия отклика.</p>'}
-      <h2>Личные</h2>${dms.length ? dms.map((d) => `<div class="card click row" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="grow"><b>${esc(d.info.title)}</b><div class="mut sm">${esc(d.info.shift.title)}</div><div class="sm ${d.last ? '' : 'mut'}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.last ? esc(d.last.text) : 'Нет сообщений — напишите первым'}</div></div><span class="mut sm">${d.last ? hhmm(d.last.at) : ''}</span></div>`).join('') : `<p class="mut">${S.role === 'contractor' ? 'Здесь появятся чаты с исполнителями, которые откликнулись на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.'}</p>`}`;
+      <h2>Личные</h2>${dms.length ? dms.map((d) => `<div class="card click row" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="grow"><b>${esc(d.info.title)}</b><span class="rt ${S.role === 'contractor' ? 'worker' : 'owner'}" style="margin-left:6px">${S.role === 'contractor' ? 'Исполнитель' : 'Подрядчик'}</span><div class="mut sm">${esc(d.info.shift.title)}</div><div class="sm ${d.last ? '' : 'mut'}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.last ? esc(d.last.text) : 'Нет сообщений — напишите первым'}</div></div><span class="mut sm">${d.last ? hhmm(d.last.at) : ''}</span></div>`).join('') : `<p class="mut">${S.role === 'contractor' ? 'Здесь появятся чаты с исполнителями, которые откликнулись на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.'}</p>`}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
   ctx.main.dataset.h = ''; await render(); ctx.poll = render;
@@ -160,7 +160,7 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
     for (const m of list) {
       if (seen.has(m.id)) continue; seen.add(m.id); last = Math.max(last, m.id); cache[m.id] = m;
       const d = document.createElement('div'); d.className = 'm' + (m.user_id === me ? ' me' : ''); d.dataset.act = 'msg'; d.dataset.id = m.id;
-      d.innerHTML = `${m.user_id === me ? '' : `<div class="who ${m.role}">${esc(m.name)}${m.role === 'owner' ? ' · подрядчик' : m.role === 'senior' ? ' · старший' : ''}</div>`}${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
+      d.innerHTML = `<div class="who ${m.role}">${m.user_id === me ? 'Вы' : esc(m.name)}<span class="rt ${m.role}">${{ owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель' }[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
       box.appendChild(d);
     }
     if (list.length && (near || last === list[list.length - 1].id)) box.scrollTop = box.scrollHeight;
@@ -202,12 +202,15 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
 async function dmChat(ctx, appId) {
   appId = Number(appId);
   const info = await api.dmInfo(appId);
-  const isC = S.role === 'contractor' && info.can_manage;
+  const isC = info.can_manage; // подрядчик или админ чата с правом «работа с откликами»
+  const meId = getSession().me, other = info.application.worker_id === meId ? 'подрядчик' : 'исполнитель';
   const st = info.application.status;
-  const top = `<div class="card" style="margin:0 12px 6px;flex:none"><div class="row sp"><div class="grow"><b>${esc(info.shift.title)}</b><div class="mut sm">${esc(dateLabel(info.shift.date))} · ${esc(info.shift.start)}–${esc(info.shift.end)} · ${money(info.shift.pay)}</div></div>${statusTag(st)}</div>
+  const top = `<div class="card" style="margin:0 12px 6px;flex:none"><div class="row sp"><div class="grow"><b>${esc(info.shift.title)}</b><div class="mut sm">${esc(dateLabel(info.shift.date))} · ${esc(timeRange(info.shift))} · ${esc(payLabel(info.shift))}</div></div>${statusTag(st)}</div>
+    <a class="g sm" href="#" data-act="prof" style="display:inline-block;margin-top:8px">Профиль: ${esc(info.title)} · ${other} ›</a>
     ${isC && st === 'pending' ? '<div class="row gap" style="margin-top:10px"><button class="btn danger sm grow" data-act="rej">Отклонить</button><button class="btn pri sm grow" data-act="acc">Принять</button></div>' : ''}
     ${st === 'accepted' ? '<a class="g sm" href="#" data-act="team" style="display:inline-block;margin-top:8px">Общий чат команды смены ›</a>' : ''}</div>`;
-  await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title)}</div>`, { extraTop: top });
+  await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title + ' · ' + other)}</div>`, { extraTop: top });
+  ctx.acts.prof = () => go(info.application.worker_id === meId ? '#/w/contractor/' + info.shift.contractor_id : '#/c/worker/' + info.application.worker_id);
   const decide = (d, q) => async () => { if (!(await confirmBox(q, { ok: d === 'accepted' ? 'Принять' : 'Отклонить', danger: d === 'rejected' }))) return; await api.decide(appId, d); toast(d === 'accepted' ? 'Исполнитель принят' : 'Отклик отклонён', 'ok'); dmChat(ctx, appId); };
   ctx.acts.team = () => go('#/team/' + info.shift.id);
   ctx.acts.acc = decide('accepted', 'Принять кандидата в команду смены?');
@@ -222,22 +225,24 @@ async function team(ctx, sid) {
   const can = (p) => isOwner || (T.my_perms || []).includes(p);
   const n = s.accepted_count;
   const head = `<div style="padding:0 12px">${pageHead(shiftName(s), can('remove') || isOwner ? '' : '')}
-    <div class="row sp sm" style="margin-bottom:4px"><span>${n} / ${s.people} чел.</span><a class="g" href="#" data-act="members">Участники ›</a></div><div class="bar" style="margin-bottom:8px"><i style="width:${Math.min(100, (n / s.people) * 100)}%"></i></div></div>`;
+    <div class="row sp sm" style="margin-bottom:4px"><span>${n} / ${s.people} чел.</span><span class="row gap">${can('applications') ? '<a class="g" href="#" data-act="applic">Отклики ›</a>' : ''}<a class="g" href="#" data-act="members">Участники ›</a></span></div><div class="bar" style="margin-bottom:8px"><i style="width:${Math.min(100, (n / s.people) * 100)}%"></i></div></div>`;
   await chatView(ctx, 'shift:' + sid, head, { canPin: can('pin') });
   ctx.acts.members = () => membersSheet(T, sid, can, isOwner, ctx);
+  ctx.acts.applic = () => go('#/c/shift/' + sid);
 }
 function membersSheet(T, sid, can, isOwner, ctx) {
   const me = getSession().me, s = T.shift;
-  const roleTag = (m) => (m.role === 'owner' ? '<span class="tag r">Подрядчик</span>' : m.role === 'senior' ? '<span class="tag y">Старший</span>' : '<span class="tag g">Исполнитель</span>');
-  const sh = sheet(`<h3>Участники · ${T.members.filter((m) => m.role !== 'owner').length} / ${s.people}</h3>${T.members.map((m) => `<div class="row" style="margin:10px 0">${avatar(m.avatar, m.name, 'sm')}<div class="grow"><b>${esc(m.name || '')}</b> ${roleTag(m)}${m.attended === true ? ' <span class="tag g">пришёл</span>' : m.attended === false ? ' <span class="tag r">не пришёл</span>' : ''}</div>
+  const roleTag = (m) => (m.role === 'owner' ? '<span class="tag r">Подрядчик</span>' : m.role === 'senior' ? '<span class="tag y">Админ чата</span>' : '<span class="tag g">Исполнитель</span>');
+  const sh = sheet(`<h3>Участники · ${T.members.filter((m) => m.role !== 'owner').length} / ${s.people}</h3>${T.members.map((m) => `<div class="row" style="margin:10px 0">${avatar(m.avatar, m.name, 'sm')}<div class="grow"><b class="click" data-p="${m.user_id}" data-r="${m.role}">${esc(m.name || '')}</b> ${roleTag(m)}${m.attended === true ? ' <span class="tag g">пришёл</span>' : m.attended === false ? ' <span class="tag r">не пришёл</span>' : ''}</div>
       ${m.role !== 'owner' && m.user_id !== me && (can('attendance') || can('remove') || isOwner) ? `<button class="btn sm" data-m="${m.user_id}">⋯</button>` : ''}</div>`).join('')}
     ${isOwner && s.status !== 'completed' && s.status !== 'cancelled' ? '<button class="btn pri block" data-fin style="margin-top:12px">Смена завершена</button>' : ''}`);
   sh.el.onclick = async (e) => {
+    const pr = e.target.closest('[data-p]'); if (pr) { sh.close(); return go(pr.dataset.r === 'owner' ? '#/w/contractor/' + pr.dataset.p : '#/c/worker/' + pr.dataset.p); }
     if (e.target.closest('[data-fin]')) { sh.close(); return finishShift(sid).catch((er) => toast(errMsg(er), 'err')); }
     const b = e.target.closest('[data-m]'); if (!b) return;
     const uidv = Number(b.dataset.m), m = T.members.find((x) => x.user_id === uidv); sh.close();
     const a = sheet(`<h3>${esc(m.name)}</h3>${can('attendance') ? '<div class="row gap"><button class="btn grow" data-a="here">✓ Пришёл</button><button class="btn grow" data-a="miss">✗ Не пришёл</button></div><div style="height:8px"></div>' : ''}
-      ${isOwner ? `<button class="btn block" data-a="senior">${m.role === 'senior' ? 'Изменить права старшего' : 'Назначить старшим'}</button><div style="height:8px"></div>` : ''}${can('remove') ? '<button class="btn danger block" data-a="rm">Удалить из команды</button>' : ''}`);
+      ${isOwner ? `<button class="btn block" data-a="senior">${m.role === 'senior' ? 'Права админа чата' : 'Назначить админом чата'}</button><div style="height:8px"></div>` : ''}${can('remove') ? '<button class="btn danger block" data-a="rm">Удалить из команды</button>' : ''}`);
     a.el.onclick = async (ev) => {
       const act = ev.target.dataset.a; if (!act) return; a.close();
       try {
@@ -250,9 +255,9 @@ function membersSheet(T, sid, can, isOwner, ctx) {
   };
 }
 function seniorSheet(sid, m, done) {
-  const P = [['pin', 'Закреплять сообщения'], ['attendance', 'Отмечать явку'], ['remove', 'Удалять участников'], ['applications', 'Работать с откликами']];
+  const P = [['pin', 'Закреплять сообщения'], ['attendance', 'Отмечать явку'], ['remove', 'Удалять участников'], ['applications', 'Принимать отклики за подрядчика']];
   const on = new Set(m.perms || []);
-  const s = sheet(`<h3>Права старшего: ${esc(m.name)}</h3>${P.map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(on.has(k), 'x', `data-k="${k}"`)}</div>`).join('')}<p class="mut sm">Без включённых прав участник станет обычным исполнителем.</p><button class="btn pri block" id="ok">Сохранить</button>`);
+  const s = sheet(`<h3>Админ чата: ${esc(m.name)}</h3><p class="mut sm">Админ чата помогает подрядчику вести смену. С правом «принимать отклики» он принимает и отклоняет исполнителей вместо подрядчика.</p>${P.map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(on.has(k), 'x', `data-k="${k}"`)}</div>`).join('')}<p class="mut sm">Без включённых прав участник снова станет обычным исполнителем.</p><button class="btn pri block" id="ok">Сохранить</button>`);
   s.el.onclick = async (e) => {
     const t = e.target.closest('.switch'); if (t) { t.classList.toggle('on'); t.classList.contains('on') ? on.add(t.dataset.k) : on.delete(t.dataset.k); }
     if (e.target.id === 'ok') { try { await api.setSenior(sid, m.user_id, [...on]); s.close(); toast('Права обновлены', 'ok'); done(); } catch (er) { toast(errMsg(er), 'err'); } }
@@ -269,10 +274,15 @@ async function review(ctx, sid) {
   const list = (await api.pendingReviews()).filter((p) => p.shift.id === sid);
   if (!list.length) { ctx.render(`${pageHead('Оценка')}${emptyState('Все оценки выставлены', 'Спасибо!', `<button class="btn pri" data-act="home">Готово</button>`)}`); ctx.acts.home = () => go('#/'); return; }
   const CR = { contractor: ['Условия', 'Соответствие описанию', 'Организация', 'Своевременность оплаты'], worker: ['Пунктуальность', 'Качество работы', 'Ответственность'] };
-  ctx.render(`${pageHead('Оцените ' + (list[0].to_role === 'contractor' ? 'подрядчика' : 'исполнителей'))}<p class="mut sm">${esc(shiftName(list[0].shift))}</p>${list.map((p, i) => `<div class="card" data-i="${i}"><div class="row">${avatar(p.to_avatar, p.to_name)}<b>${esc(p.to_name)}</b></div>
+  ctx.render(`${pageHead('Оцените ' + (list[0].to_role === 'contractor' ? 'подрядчика' : 'исполнителей'))}<p class="mut sm">${esc(shiftName(list[0].shift))}</p><p class="mut sm" style="margin-top:-6px">Оценка необязательна — её можно пропустить.</p>${list.map((p, i) => `<div class="card" data-i="${i}"><div class="row">${avatar(p.to_avatar, p.to_name)}<b>${esc(p.to_name)}</b></div>
     <div class="stars" data-main data-field style="margin:10px 0"></div>${CR[p.to_role].map((c, j) => `<div class="row sp sm"><span>${c}</span><span class="stars" data-c="${j}" style="font-size:20px;letter-spacing:2px"></span></div>`).join('')}
-    <textarea class="i" placeholder="Комментарий (необязательно)" style="margin-top:10px;min-height:56px"></textarea><button class="btn pri block" style="margin-top:10px" data-act="send" data-i="${i}">Отправить</button></div>`).join('')}`);
+    <textarea class="i" placeholder="Комментарий (необязательно)" style="margin-top:10px;min-height:56px"></textarea><div class="row gap" style="margin-top:10px"><button class="btn grow" data-act="skip1" data-i="${i}">Пропустить</button><button class="btn pri grow" data-act="send" data-i="${i}">Отправить</button></div></div>`).join('')}<button class="btn ghost block" data-act="skipAll" style="margin-top:6px">Пропустить всё</button>`);
   const getters = list.map((p, i) => { const card = ctx.main.querySelector(`.card[data-i="${i}"]`); return { main: mountStars(card.querySelector('[data-main]')), cr: [...card.querySelectorAll('[data-c]')].map((e) => mountStars(e)), card }; });
+  ctx.acts.skip1 = async (el) => {
+    const i = Number(el.dataset.i); await api.skipReview(sid, list[i].to_user); getters[i].card.innerHTML = '<p class="mut">Пропущено</p>';
+    if (!ctx.main.querySelector('.btn.pri')) setTimeout(() => go('#/'), 500);
+  };
+  ctx.acts.skipAll = async () => { await api.skipReview(sid); toast('Оценка пропущена'); go('#/'); };
   ctx.acts.send = async (el) => {
     const i = Number(el.dataset.i), p = list[i], g = getters[i], stars = g.main();
     if (!validate([[g.card.querySelector('[data-main]'), stars > 0, 'Поставьте оценку — от 1 до 5 звёзд']])) return;

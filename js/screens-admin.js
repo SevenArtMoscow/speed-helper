@@ -1,7 +1,7 @@
 // Админ-панель владельцев (доступ только при users.is_admin = true; проверяется и на сервере)
 import { api } from './api.js';
 import { S, go, toast, errMsg, confirmBox, sheet, pageHead, statusTag, validate } from './ui.js';
-import { esc, dateLabel, money, timeAgo } from './util.js';
+import { esc, dateLabel, timeAgo, payLabel } from './util.js';
 
 const TABS = [['stats', 'Показатели'], ['users', 'Пользователи'], ['shifts', 'Смены'], ['reports', 'Жалобы'], ['cats', 'Категории'], ['audit', 'Журнал']];
 
@@ -21,7 +21,7 @@ async function admin(ctx, tab = 'stats') {
   }
   if (tab === 'shifts') {
     const l = await api.adminShifts();
-    body = l.map((s) => `<div class="card"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div><div class="mut sm">${esc(s.contractor?.name || '')} · ${esc(dateLabel(s.date))} · ${money(s.pay)}${s.hidden ? ' · <span class="r">скрыта</span>' : ''}</div>
+    body = l.map((s) => `<div class="card"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div><div class="mut sm">${esc(s.contractor?.name || '')} · ${esc(dateLabel(s.date))} · ${esc(payLabel(s))}${s.hidden ? ' · <span class="r">скрыта</span>' : ''}</div>
       <button class="btn sm" style="margin-top:8px" data-act="hide" data-id="${s.id}" data-h="${s.hidden ? 0 : 1}">${s.hidden ? 'Показать' : 'Скрыть объявление'}</button></div>`).join('') || '<p class="mut">Пусто</p>';
   }
   if (tab === 'reports') {
