@@ -146,7 +146,7 @@ async function search(ctx) {
 function filtersSheet(F, apply) {
   const s = sheet(`<h3>Фильтры</h3>
     <label class="f">Когда</label><div class="row wrap gap" id="fd">${[['today', 'Сегодня'], ['tomorrow', 'Завтра'], ['weekend', 'Выходные'], ['any', 'Любая']].map(([k, t]) => `<span class="chip ${F.date === k ? 'on' : ''}" data-d="${k}">${t}</span>`).join('')}</div>
-    <label class="f">Минимальная оплата: <b id="pv">от ${money(F.min_pay)}</b></label><input type="range" id="pr" min="0" max="15000" step="50" value="${F.min_pay}"><div class="row gap"><input class="i" id="pn" type="number" inputmode="numeric" value="${F.min_pay}" placeholder="Своя сумма"><span class="mut sm" style="white-space:nowrap">до 15 000 ₽+</span></div>
+    <label class="f">Минимальная оплата: <b id="pv">от ${money(F.min_pay)}</b></label><input type="range" id="pr" min="0" max="15000" step="50" value="${F.min_pay}"><div class="row gap"><input class="i" id="pn" type="number" inputmode="numeric" value="${F.min_pay}" placeholder="Своя сумма"><span class="mut sm" style="white-space:nowrap">до 15 000 ₽+</span></div><p class="hint">Для почасовой оплаты считаем сумму за всю смену (если «до выполнения» — за 8 часов)</p>
     <label class="f">Где</label><div class="row wrap gap" id="fg">${[['msk', 'Москва'], ['mo', 'Московская область'], ['any', 'Любая']].map(([k, t]) => `<span class="chip ${F.geo === k ? 'on' : ''}" data-g="${k}">${t}</span>`).join('')}</div>
     <p class="hint">Работаем только в Москве и Московской области</p>
     <label class="f">Какую работу ищете?</label><div class="row wrap gap" id="fc">${S.cats.map((c) => `<span class="chip ${F.categories.includes(c.id) ? 'on' : ''}" data-c="${c.id}">${esc(c.name)}</span>`).join('')}</div>

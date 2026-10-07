@@ -10,7 +10,7 @@ const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
 
 const shiftRow = (s, extra = '') => `<div class="card click" data-act="open" data-id="${s.id}"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div>
-  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
+  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.ended && ['open', 'full'].includes(s.status) ? '<span class="tag o">Время прошло — завершите смену</span>' : ''}${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
 
 async function home(ctx) {
   if (need()) return go('#/c/onboard');
@@ -31,7 +31,7 @@ async function shifts(ctx, mode) {
   if (need()) return go('#/c/onboard');
   let tab = mode === 'new' ? 'new' : mode === 'done' ? 'done' : 'act';
   const ACT = ['open', 'full'];
-  const T = [['act', 'Активные', (s) => ACT.includes(s.status)], ['new', 'Новые отклики', (s) => ACT.includes(s.status) && s.pending_count > 0], ['done', 'Завершённые', (s) => s.status === 'completed', 'o'], ['off', 'Отменённые', (s) => s.status === 'cancelled']];
+  const T = [['act', 'Активные', (s) => ACT.includes(s.status)], ['new', 'С откликами', (s) => ACT.includes(s.status) && s.pending_count > 0], ['done', 'Завершённые', (s) => s.status === 'completed', 'o'], ['off', 'Отменённые', (s) => s.status === 'cancelled']];
   let list = [];
   const draw = () => {
     const cur = T.find((t) => t[0] === tab), l = list.filter(cur[2]);

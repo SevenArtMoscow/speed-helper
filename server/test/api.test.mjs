@@ -365,6 +365,19 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('NEW: рейтинг: у нового исполнителя нет места', X.call('leaderboard', 'all'), (b) => b.me === null);
   await ok('NEW: рейтинг упорядочен по очкам', W1.call('leaderboard', 'all'), (b) => b.top.every((x, i) => i === 0 || b.top[i - 1].score >= x.score));
 
+  // напоминания и закладки, которые перестали быть доступными
+  const SX = await ok('NEW: смена для напоминаний', C.call('createShift', { ...sp, title: 'Прошедшая неоконченная', date: day(7), people: 2 }, key()));
+  await ok('NEW: W3 откладывает её', W3.call('toggleShiftFav', SX.id));
+  const sxap = await ok('NEW: W2 откликается', W2.call('apply', SX.id)); await ok('NEW: W2 принят', C.call('decide', sxap.id, 'accepted'));
+  await db.query("update shifts set date = current_date, start_time = '00:00', end_time = '00:01', until_done = false where id = $1", [SX.id]);
+  await ok('NEW: смена помечена «время прошло»', C.call('getShift', SX.id), (b) => b.ended === true);
+  await db.query('select maintenance()');
+  await ok('NEW: подрядчик получил напоминание', C.call('notifications'), (b) => b.filter((n) => n.type === 'shift_overdue' && n.link === '#/c/shift/' + SX.id).length === 1);
+  await db.query('select maintenance()');
+  await ok('NEW: напоминание не дублируется', C.call('notifications'), (b) => b.filter((n) => n.type === 'shift_overdue' && n.link === '#/c/shift/' + SX.id).length === 1);
+  await ok('NEW: W3 уведомлён, что отложенная смена недоступна', W3.call('notifications'), (b) => b.some((n) => n.type === 'saved_gone' && /Прошедшая неоконченная/.test(n.text)));
+  await ok('NEW: закладка снята', W3.call('savedShifts'), (b) => !b.some((x) => x.id === SX.id));
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });
