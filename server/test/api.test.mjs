@@ -111,7 +111,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('accept W1 повтор', C.call('decide', a1b.id, 'accepted'));
   await ok('accept W2 (смена набрана)', C.call('decide', a2.id, 'accepted'));
   await ok('getShift full', W3.call('getShift', S1.id), (b) => b.status === 'full');
-  await no('accept W3 сверх мест', C.call('decide', a3.id, 'accepted'));
+  await no('accept W3 сверх мест', C.call('decide', a3.id, 'accepted'), 'full');
   await ok('reject W3', C.call('decide', a3.id, 'rejected'), (b) => b.status === 'rejected');
   await no('decide уже отклонённого', C.call('decide', a3.id, 'accepted'), 'conflict');
   await ok('contractorStats', C.call('contractorStats'), (b) => b.active === 2 && b.workers === 2);
@@ -268,6 +268,45 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   check('поддельный токен отклоняется', bad.status === 401);
   const forged = await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id: 1, first_name: 'Хакер' }).replace(/hash=[0-9a-f]+/, 'hash=' + '0'.repeat(64)) }) });
   check('подделанные данные Telegram отклоняются', forged.status === 401);
+
+  // ===== регрессия по итогам QA =====
+  // рейтинг по ролям: оценка, полученная в одной роли, не попадает в профиль другой роли того же человека
+  await ok('QA: у C как исполнителя нет оценок (оценён как подрядчик)', W1.call('workerPage', C.id), (b) => b.worker.rating === null && b.reviews.length === 0);
+  await ok('QA: saveContractor W1', W1.call('saveContractor', { ...cp, name: 'Пётр-подрядчик' }));
+  await ok('QA: у W1 как подрядчика нет оценок', C2.call('contractorPage', W1.id), (b) => b.contractor.rating === null && b.reviews.length === 0);
+  await ok('QA: у W1 как исполнителя оценка 4', C.call('workerPage', W1.id), (b) => b.worker.rating === 4 && b.reviews.length === 1);
+  // прошедшее время смены
+  await no('QA: смена на сегодня с прошедшим временем', C.call('createShift', { ...sp, date: day(0), start: '00:00', end: '00:01' }, key()), 'invalid');
+  const ES = await ok('QA: смена на сегодня вечером', C.call('createShift', { ...sp, title: 'Сегодняшняя', date: day(0), start: '23:58', end: '23:59' }, key()));
+  await db.query("update shifts set start_time = '00:00', end_time = '00:01' where id = $1", [ES.id]);
+  await ok('QA: прошедшая смена не в ленте', W3.call('feed', {}), (b) => !b.items.some((x) => x.id === ES.id));
+  await no('QA: отклик на прошедшую смену', W3.call('apply', ES.id), 'closed');
+  await ok('QA: прошедшая смена не на странице подрядчика', W3.call('contractorPage', C.id), (b) => !b.shifts.some((x) => x.id === ES.id));
+  // отмена отклика убирает уведомление подрядчику
+  await ok('QA: apply W3→S3', W3.call('apply', S3.id));
+  await ok('QA: уведомление об отклике есть', C2.call('notifications'), (b) => b.some((n) => n.type === 'new_application' && /Олег/.test(n.text) && n.link === '#/c/shift/' + S3.id));
+  await ok('QA: undoApply W3', W3.call('undoApply', S3.id), (b) => b === true);
+  await ok('QA: уведомление об отклике убрано', C2.call('notifications'), (b) => !b.some((n) => n.type === 'new_application' && /Олег/.test(n.text) && n.link === '#/c/shift/' + S3.id));
+  // нерассмотренные отклики уведомляются при завершении
+  const SH = await ok('QA: смена для завершения', C.call('createShift', { ...sp, title: 'Завершаемая', date: day(4) }, key()));
+  await ok('QA: apply W2→SH', W2.call('apply', SH.id));
+  await ok('QA: completeShift SH', C.call('completeShift', SH.id));
+  await ok('QA: W2 уведомлён о закрытии отклика', W2.call('notifications'), (b) => b.some((n) => n.type === 'shift_closed' && /Завершаемая/.test(n.text)));
+  // закреплённое сообщение — отдельным запросом; первая загрузка — последние 300
+  await ok('QA: pin', C.call('pinMessage', m1.id, true));
+  await ok('QA: messages(pin) возвращает закреплённое', W1.call('messages', 'shift:' + S1.id, 0, 'pin'), (b) => b.length === 1 && b[0].id === m1.id);
+  await ok('QA: unpin', C.call('pinMessage', m1.id, false));
+  await ok('QA: после открепления пусто', W1.call('messages', 'shift:' + S1.id, 0, 'pin'), (b) => b.length === 0);
+  await db.query("insert into messages(scope, user_id, text) select 'shift:' || $1::text, $2::bigint, 'm' || g from generate_series(1, 320) g", [S1.id, W1.id]);
+  await ok('QA: первая загрузка чата — не больше 300, последние', W1.call('messages', 'shift:' + S1.id, 0), (b) => b.length === 300 && b[299].text === 'm320');
+  await ok('QA: догрузка после последнего id', W1.call('messages', 'shift:' + S1.id, 0).then(async (r) => W1.call('messages', 'shift:' + S1.id, r.body[299].id)), (b) => b.length === 0);
+  await no('QA: страница несуществующего подрядчика', W1.call('contractorPage', 99999), 'not_found');
+  await no('QA: страница несуществующего исполнителя', W1.call('workerPage', 99999), 'not_found');
+  // не пришёл — не считается проведённой сменой
+  await ok('QA: отметка «не пришёл»', C.call('setAttendance', S1.id, W1.id, false));
+  await ok('QA: no-show не в «проведено смен»', C.call('workerPage', W1.id), (b) => b.worker.shifts_done === 0);
+  await ok('QA: отметка «пришёл»', C.call('setAttendance', S1.id, W1.id, true));
+  await ok('QA: пришёл — снова считается', C.call('workerPage', W1.id), (b) => b.worker.shifts_done === 1);
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

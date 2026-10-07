@@ -10,7 +10,7 @@ const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
 
 const shiftRow = (s, extra = '') => `<div class="card click" data-act="open" data-id="${s.id}"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div>
-  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)} · ${money(s.pay)}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.pending_count ? `<span class="tag g">${s.pending_count} новых откликов</span>` : ''}</div>${extra}</div>`;
+  <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(s.start)}–${esc(s.end)} · ${money(s.pay)}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
 
 async function home(ctx) {
   if (need()) return go('#/c/onboard');
@@ -198,12 +198,12 @@ async function shiftPage(ctx, id) {
       <div class="row sp sm"><span>👥 ${s.accepted_count} / ${s.people}</span></div><div class="bar" style="margin:6px 0"><i style="width:${Math.min(100, (s.accepted_count / s.people) * 100)}%"></i></div>
       ${s.description ? `<p class="mut sm">${esc(s.description)}</p>` : ''}${(s.requirements || []).map((r) => `<span class="tag">${esc(r)}</span> `).join('')}
       ${active ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button><button class="btn sm danger" data-act="cancel">Отменить</button></div>' : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
-      <h2>Отклики · ${apps.length}</h2>${apps.length ? groups.map(([st, t]) => { const l = apps.filter((a) => a.status === st); return l.length ? `<div class="mut sm" style="margin:12px 0 4px">${t} · ${l.length}</div>` + l.map((a) => cand(a, active)).join('') : ''; }).join('') : '<p class="mut">Пока никто не откликнулся.</p>'}`;
+      <h2>Отклики · ${apps.length}</h2>${apps.length ? groups.map(([st, t]) => { const l = apps.filter((a) => a.status === st); return l.length ? `<div class="mut sm" style="margin:12px 0 4px">${t} · ${l.length}</div>` + l.map((a) => cand(a, active, s.status === 'open')).join('') : ''; }).join('') : '<p class="mut">Пока никто не откликнулся.</p>'}`;
     if (ctx.main.dataset.h !== html && !document.querySelector('.ov')) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
     ctx.shiftData = { s, apps };
   };
-  const cand = (a, active) => { const w = a.worker || {}; return `<div class="card"><div class="row click" data-act="prof" data-id="${a.worker_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div>${(w.skills || []).length ? `<div class="mut sm">${esc(w.skills.slice(0, 4).join(', '))}</div>` : ''}</div>${statusTag(a.status)}</div>
-    <div class="row gap" style="margin-top:10px"><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button>${a.status === 'pending' && active ? `<button class="btn sm danger" data-act="dec" data-app="${a.id}" data-d="rejected" data-n="${esc(w.name)}">Отклонить</button><button class="btn sm pri" data-act="dec" data-app="${a.id}" data-d="accepted" data-n="${esc(w.name)}">Принять</button>` : ''}</div></div>`; };
+  const cand = (a, active, canAccept) => { const w = a.worker || {}; return `<div class="card"><div class="row click" data-act="prof" data-id="${a.worker_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div>${(w.skills || []).length ? `<div class="mut sm">${esc(w.skills.slice(0, 4).join(', '))}</div>` : ''}</div>${statusTag(a.status)}</div>
+    <div class="row gap" style="margin-top:10px"><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button>${a.status === 'pending' && active ? `<button class="btn sm danger" data-act="dec" data-app="${a.id}" data-d="rejected" data-n="${esc(w.name)}">Отклонить</button>${canAccept ? `<button class="btn sm pri" data-act="dec" data-app="${a.id}" data-d="accepted" data-n="${esc(w.name)}">Принять</button>` : ''}` : ''}</div></div>`; };
   ctx.main.dataset.h = ''; await load(); ctx.poll = load;
   ctx.acts.edit = () => go('#/c/edit/' + id);
   ctx.acts.team = () => go('#/team/' + id);

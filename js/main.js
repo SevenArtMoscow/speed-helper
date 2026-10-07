@@ -73,7 +73,7 @@ async function route() {
   if (ctx.cleanup) { try { ctx.cleanup(); } catch {} }
   ctx.acts = {}; ctx.poll = null; ctx.cleanup = null;
   const my = ++navToken;
-  document.querySelectorAll('.ov,.toast').forEach((n) => n.remove());
+  document.querySelectorAll('.ov').forEach((n) => n.remove());
   ctx.render(skeleton());
   try {
     let h = hash;

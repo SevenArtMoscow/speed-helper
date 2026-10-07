@@ -168,8 +168,11 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
   const pinBar = (list) => { const p = list.find((m) => m.pinned); const el = document.getElementById('pin'); if (el) { el.hidden = !p; if (p) el.textContent = '📌 ' + p.text; } };
   add(await api.messages(scope, 0));
   const all = () => Object.values(cache);
-  pinBar(all());
-  ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (l.length) pinBar(all()); };
+  // закреплённое сообщение запрашивается отдельно: его могли закрепить/открепить без новых сообщений, а оно может быть старше загруженных
+  const syncPin = async () => { const p = await api.messages(scope, 0, 'pin'); Object.values(cache).forEach((x) => (x.pinned = false)); p.forEach((x) => { (cache[x.id] = cache[x.id] || x).pinned = true; }); pinBar(all()); };
+  const team = scope.startsWith('shift:');
+  if (team) await syncPin().catch(() => pinBar(all())); else pinBar(all());
+  ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (team) await syncPin(); };
   // Отправка: кнопка, Enter и клавиша «Отправить» на телефоне идут через submit формы.
   // На телефоне касание кнопки обрабатываем сразу (touchstart) и не даём полю потерять фокус:
   // иначе первое касание лишь прячет клавиатуру, экран перестраивается и нажатие теряется.
@@ -191,7 +194,7 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
     s.el.onclick = async (e) => {
       const a = e.target.dataset.a; if (!a) return; s.close();
       if (a === 'rep') reportSheet('message', m.id);
-      if (a === 'pin') { try { await api.pinMessage(m.id, !m.pinned); Object.values(cache).forEach((x) => (x.pinned = false)); m.pinned = !m.pinned; pinBar(all()); } catch (er) { toast(errMsg(er), 'err'); } }
+      if (a === 'pin') { try { const next = !m.pinned; await api.pinMessage(m.id, next); Object.values(cache).forEach((x) => (x.pinned = false)); m.pinned = next; pinBar(all()); } catch (er) { toast(errMsg(er), 'err'); } }
     };
   };
 }

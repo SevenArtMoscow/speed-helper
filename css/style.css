@@ -206,3 +206,9 @@ a.g{text-decoration:none;font-weight:600}
   #splash *{animation:none!important;transition:none!important}
   .sp-bolt{stroke-dashoffset:0;fill:#39ff6a}.sp-name span,.sp-by span{opacity:1;transform:translateY(var(--w,0px))}.sp-ring{display:none}
 }
+
+/* QA: кнопки не переносят текст; ряд вкладок сжимается и прокручивается, не вытесняя соседнюю кнопку */
+.btn.sm{white-space:nowrap}
+.row.sp>.tabsx{flex:1 1 auto;min-width:0}
+.row.sp>.btn.sm{flex:none}
+.tabsx .chip{padding:8px 12px}

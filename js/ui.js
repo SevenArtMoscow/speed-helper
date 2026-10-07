@@ -49,11 +49,17 @@ export const go = (hash) => { if (location.hash === hash) window.dispatchEvent(n
 export const back = () => { if (history.length > 1) history.back(); else go(S.role === 'contractor' ? '#/c/home' : '#/w/search'); };
 
 export function toast(msg, kind = '') {
+  document.querySelectorAll('.toast').forEach((n) => n.remove()); // одновременно виден один тост
   const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; document.body.appendChild(t);
   if (navigator.vibrate && kind === 'ok') navigator.vibrate(10);
   setTimeout(() => t.remove(), 2600);
 }
-export const errMsg = (e) => (e && e.message && e.code !== 'server' ? e.message : 'Не удалось выполнить действие. Попробуйте ещё раз');
+// показываем только понятные сообщения сервера; технические ошибки (TypeError и т. п.) пользователю не выводим
+export const errMsg = (e) => {
+  if (e && e.code && e.code !== 'server' && e.message) return e.message;
+  if (e && /failed to fetch|networkerror|load failed/i.test(String(e.message))) return 'Нет связи с сервером. Проверьте интернет';
+  return 'Не удалось выполнить действие. Попробуйте ещё раз';
+};
 
 export function sheet(html, { mid = false } = {}) {
   const ov = document.createElement('div'); ov.className = 'ov' + (mid ? ' mid' : '');
