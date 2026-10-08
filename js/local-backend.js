@@ -306,7 +306,7 @@ const API = {
     actor(me);
     const s = shiftOr404(sid);
     if (!canManage(s, me, 'applications')) fail('forbidden');
-    return db.applications.filter((a) => a.shift_id === sid).sort((a, b) => b.created_at - a.created_at).map((a) => ({ ...a, worker: workerView(a.worker_id) }));
+    return db.applications.filter((a) => a.shift_id === sid).sort((a, b) => a.created_at - b.created_at || a.id - b.id).map((a) => ({ ...a, worker: workerView(a.worker_id) }));
   },
   decide(me, appId, decision) {
     actor(me);

@@ -330,7 +330,7 @@ export async function finishShift(sid, after) {
 
 // ---------- подписка PRO ----------
 const PERKS = {
-  w: [['crown', 'Значок PRO и золотая рамка', 'Вас сразу заметно в откликах, чатах и профиле', 1], ['bolt', 'Вы первым в списке откликов', 'Подрядчик сначала видит PRO-исполнителей', 1],
+  w: [['crown', 'Значок PRO и золотая рамка', 'Вас сразу заметно в откликах, чатах и профиле', 1],
     ['clock', 'Ранний доступ к новым сменам', 'Видите смены на 15 минут раньше остальных', 0], ['mine', 'Статистика заработка', 'Сколько заработано за месяц, график и лучшие смены', 0], ['bell', 'Уведомления о горячих сменах', 'Срочные смены рядом — сразу к вам', 0]],
   c: [['crown', 'Значок PRO у профиля и смен', 'Исполнители больше доверяют', 1], ['search', 'Ваши смены выше в ленте', 'В пределах дня PRO-смены показываются раньше', 1], ['bolt', 'Поднять в топ — 3 раза в месяц', 'Смена на 6 часов выше всех в ленте', 1],
     ['shifts', 'Повтор смены в один клик и шаблоны', 'Публикация за 10 секунд', 0], ['mine', 'Аналитика откликов', 'Просмотры, отклики, принятые', 0], ['chats', 'Приоритетная поддержка', 'Отвечаем в первую очередь', 0]],
@@ -339,13 +339,17 @@ async function proPage(ctx) {
   const sub = await api.mySubscription(); let who = S.role === 'contractor' ? 'c' : 'w';
   const draw = () => {
     const until = sub.expires_at ? new Date(sub.expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
-    ctx.main.innerHTML = `${pageHead('PRO')}<div class="prohero"><div class="crown">${ICON.crown}</div><h1>SPEED HELPER <span>PRO</span></h1><div class="price"><b>990 ₽</b> / месяц</div>
-      ${sub.active ? `<div class="pro-on">✓ Подписка активна до ${until}</div>` : '<div class="mut sm" style="margin-top:6px">Больше заказов, больше доверия, выше в ленте</div>'}</div>
-      <div class="tabsx"><span class="chip ${who === 'w' ? 'on' : ''}" data-act="pw" data-w="w">Исполнителю</span><span class="chip ${who === 'c' ? 'on' : ''}" data-act="pw" data-w="c">Подрядчику</span></div>
-      ${PERKS[who].map(([ic, t, d, live]) => `<div class="perk"><span class="pk-ic">${ICON[ic]}</span><div class="grow"><b>${t}</b><div class="mut sm">${d}</div></div><span class="tag ${live ? 'g' : 'y'}">${live ? 'Работает' : 'Скоро'}</span></div>`).join('')}
+    const live = PERKS[who].filter((p) => p[3]), soon = PERKS[who].filter((p) => !p[3]);
+    const perk = ([ic, t, d, on]) => `<div class="perk ${on ? '' : 'soon'}"><span class="pk-ic">${ICON[ic]}</span><div class="grow"><b>${t}</b><div class="mut sm">${d}</div></div><span class="pk-st">${on ? '✓' : 'Скоро'}</span></div>`;
+    ctx.main.innerHTML = `${pageHead('PRO')}<div class="prohero"><div class="crown">${ICON.crown}</div><h1>SPEED HELPER <span>PRO</span></h1>
+      <div class="mut sm" style="margin-top:4px">${who === 'w' ? 'Заметнее для подрядчиков — больше доверия' : 'Ваши смены заметнее — быстрее набираете людей'}</div>
+      ${sub.active ? `<div class="pro-on">✓ Подписка активна до ${until}</div>` : '<div class="price"><b>990 ₽</b> / месяц<div class="sm">≈ 33 ₽ в день · без автопродления</div></div>'}</div>
+      <div class="seg"><span class="${who === 'w' ? 'on' : ''}" data-act="pw" data-w="w">Исполнителю</span><span class="${who === 'c' ? 'on' : ''}" data-act="pw" data-w="c">Подрядчику</span></div>
+      <div class="sect">Что вы получаете</div>${live.map(perk).join('')}
       ${who === 'c' && sub.active ? `<p class="mut sm">Поднятий в топ в этом месяце: осталось ${sub.boosts_limit - sub.boosts_used} из ${sub.boosts_limit}</p>` : ''}
-      ${sub.active ? '' : '<button class="btn pri block" data-act="buy" style="padding:16px;margin-top:14px">Оформить за 990 ₽ / месяц</button>'}
-      <p class="mut sm" style="margin-top:12px">PRO — необязательные дополнительные возможности. Всем остальным в приложении можно пользоваться бесплатно.</p>`;
+      ${soon.length ? `<div class="sect">Скоро добавим — уже в подписке</div>${soon.map(perk).join('')}` : ''}
+      <p class="mut sm" style="margin-top:12px">PRO — необязательные дополнительные возможности, они не влияют на порядок откликов. Всем остальным в приложении можно пользоваться бесплатно. Подписка не продлевается сама.</p>
+      ${sub.active ? '' : '<div class="probar"><button class="btn pri block" data-act="buy">Оформить PRO · 990 ₽ / месяц</button></div>'}`;
   };
   draw();
   ctx.acts.pw = (el) => { who = el.dataset.w; draw(); };

@@ -331,13 +331,22 @@ export function profileBlock(w, own) {
     + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')
     + (phone10(w.phone) ? `<a class="callbtn" href="tel:+7${phone10(w.phone)}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>Позвонить</small></a>` : '');
 }
+// что именно добавить в профиль: пункты с «+N%», по нажатию — сразу в редактирование
+const TODO = [['avatar', 'Добавьте фото', 10, (w) => !!w.avatar], ['experience', 'Расскажите об опыте', 10, (w) => !!w.experience], ['skills', 'Укажите навыки', 10, (w) => (w.skills || []).length > 0],
+  ['phone', 'Добавьте телефон', 5, (w) => !!w.phone], ['about', 'Напишите о себе', 5, (w) => !!w.about], ['license', 'Укажите водительские права', 5, (w) => (w.license || []).length > 0],
+  ['flags', 'Отметьте особенности (медкнижка, самозанятость, ночные, инструмент)', 5, (w) => w.medbook && w.selfemployed && w.night && w.tools]];
+function todoList(w) {
+  if (w.percent >= 100) return '<p class="mut sm" style="margin:12px 0 0">Профиль заполнен полностью — отлично!</p>';
+  const left = TODO.filter(([, , , has]) => !has(w)).slice(0, 3);
+  return `<div class="mut sm" style="margin-top:12px">Что добавить, чтобы подрядчики вам доверяли:</div>${left.map(([k, t, n]) => `<button class="todo" data-act="edit"><span>${t}</span><span class="pl">+${n}%</span></button>`).join('')}`;
+}
 async function profile(ctx) {
   const u = await refreshMe(); const w = u.worker, ok = w.percent >= CONFIG.MIN_VERIFIED_PERCENT;
   const P = await api.workerPage(u.id).catch(() => null), R = await api.userReviews(u.id, 'worker', 0).catch(() => null);
   const active = P && P.active.length ? sect('Активные задания') + P.active.map((a) => `<div class="card click row sp" data-act="openShift" data-id="${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>›</div>`).join('') : '';
   ctx.render(`${profileBlock(w, true)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
-    ${w.percent < 100 ? `<p class="mut sm" style="margin:12px 0 0">Чем полнее профиль, тем больше доверия подрядчиков и выше позиция в поиске.</p>` : ''}</div>
+    ${todoList(w)}</div>
     ${proCard(u)}${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
 }

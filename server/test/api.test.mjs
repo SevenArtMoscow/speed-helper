@@ -434,11 +434,11 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('PRO: счётчик поднятий', C.call('mySubscription'), (b) => b.active === true && b.boosts_used === 1 && b.source === 'admin');
   await ok('PRO: второе поднятие', C.call('boostShift', PS.id)); await ok('PRO: третье поднятие', C.call('boostShift', PS.id));
   await no('PRO: четвёртое — лимит месяца', C.call('boostShift', PS.id), 'limit');
-  // приоритет PRO-исполнителя в откликах
+  // порядок откликов — строго по времени (PRO на него не влияет)
   const PS2 = await ok('PRO: смена для откликов', C2.call('createShift', { ...sp, title: 'Отклики PRO', date: day(11), people: 3 }, key()));
   await ok('PRO: W3 откликается первым', W3.call('apply', PS2.id)); await ok('PRO: админ выдаёт PRO исполнителю W2', A.call('adminGrantPro', W2.id, 7));
   await ok('PRO: W2 откликается позже', W2.call('apply', PS2.id));
-  await ok('PRO: PRO-исполнитель первый в откликах', C2.call('applicants', PS2.id), (b) => b.length === 2 && b[0].worker_id === W2.id && b[0].worker.pro === true && b[1].worker.pro === false);
+  await ok('Отклики: кто откликнулся раньше — тот первый (даже если позже стал PRO)', C2.call('applicants', PS2.id), (b) => b.length === 2 && b[0].worker_id === W3.id && b[0].worker.pro === false && b[1].worker_id === W2.id && b[1].worker.pro === true);
   await ok('PRO: в списке админа виден признак PRO', A.call('adminUsers'), (b) => b.find((u) => u.id === W2.id).pro === true && b.find((u) => u.id === W3.id).pro === false);
   await ok('PRO: продление складывается', A.call('adminGrantPro', W2.id, 7), (b) => b.expires_at > Date.now() + 13 * 864e5);
   await ok('PRO: админ снимает подписку', A.call('adminRevokePro', W2.id)); await ok('PRO: после снятия не PRO', W2.call('me'), (b) => b.pro === false);
