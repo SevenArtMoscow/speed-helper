@@ -2,7 +2,7 @@
 import { api, track, MODE, devUsers, setDevUser, tg } from './api.js';
 import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, prefs, toggle } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
 import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, shiftName, openLegal } from './screens-common.js';
@@ -14,7 +14,7 @@ const loadF = () => { try { const f = { ...defFilters(), ...JSON.parse(localStor
 const saveF = (f) => localStorage.setItem(FKEY, JSON.stringify(f));
 const needProfile = () => !S.user.roles.includes('worker');
 
-export const shiftCardBody = (s) => `<div class="row sp"><span class="tag g">${esc(s.category_name || '')}</span><span class="mut sm">${s.region === 'mo' ? 'Московская обл.' : 'Москва'}</span></div>
+export const shiftCardBody = (s) => `<div class="row sp"><span class="row gap" style="flex-wrap:wrap"><span class="tag g">${esc(s.category_name || '')}</span>${s.boosted ? '<span class="tag o">⚡ В топе</span>' : ''}${s.contractor?.pro ? proBadge() : ''}</span><span class="mut sm">${s.region === 'mo' ? 'Московская обл.' : 'Москва'}</span></div>
   <h1 style="margin:10px 0 2px">${esc(s.title)}</h1>
   <div class="row gap wrap sm"><span>${esc(s.contractor?.company || s.contractor?.name || '')}</span>${verifiedTag(s.contractor?.verified, 'Проверенный подрядчик')}<span>${stars(s.contractor?.rating, s.contractor?.reviews)}</span></div>
   <div class="pay" style="margin:12px 0 2px">${esc(payLabel(s))}</div>${payNote(s) ? `<div class="mut sm" style="margin-bottom:6px">${esc(payNote(s))}</div>` : '<div style="height:6px"></div>'}
@@ -81,12 +81,13 @@ async function search(ctx) {
 
   function bindDrag(card) {
     if (!card) return;
-    let sx = 0, sy = 0, dx = 0, drag = false, moved = false;
+    let sx = 0, sy = 0, dx = 0, drag = false, moved = false, crossed = false;
     const ok = card.querySelector('.stamp.ok'), no = card.querySelector('.stamp.no');
     card.onpointerdown = (e) => { if (e.target.closest('button')) return; drag = true; moved = false; sx = e.clientX; sy = e.clientY; card.setPointerCapture(e.pointerId); card.style.transition = 'none'; };
     card.onpointermove = (e) => {
       if (!drag) return; dx = e.clientX - sx; if (Math.abs(dx) > 6) moved = true;
-      card.style.transform = `translateX(${dx}px) rotate(${dx / 18}deg)`;
+      card.style.transform = `translateX(${dx}px) rotate(${dx / 18}deg)`; card.style.setProperty('--dx', dx);
+      if (!crossed && Math.abs(dx) > 100) { crossed = true; haptic('select'); } else if (crossed && Math.abs(dx) <= 100) crossed = false;
       ok.style.opacity = Math.max(0, Math.min(1, dx / 90)); no.style.opacity = Math.max(0, Math.min(1, -dx / 90));
     };
     const end = () => {
@@ -99,7 +100,7 @@ async function search(ctx) {
 
   // Кнопки и свайпы запускают одну и ту же логику
   async function decide(kind) {
-    if (busy || !queue.length) return; busy = true;
+    if (busy || !queue.length) return; busy = true; haptic(kind === 'like' ? 'medium' : 'light'); tick(kind === 'like' ? 'ok' : kind === 'skip' ? 'no' : 'tap');
     const s = queue[0]; const card = document.querySelector('#deck .sc:last-child');
     if (card) { card.style.transition = 'transform .28s ease-out,opacity .28s'; card.style.transform = kind === 'save' ? 'translateY(-60vh) scale(.5)' : `translateX(${kind === 'like' ? 130 : -130}vw) rotate(${kind === 'like' ? 24 : -24}deg)`; card.style.opacity = 0; }
     queue.shift();
@@ -308,7 +309,7 @@ async function top(ctx) {
 async function contractorPage(ctx, id) {
   id = Number(id);
   const P = await api.contractorPage(id), c = P.contractor;
-  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ rev: ['contractor', id, c.reviews], av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
+  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ rev: ['contractor', id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}<button class="btn block ${P.is_fav ? 'favon' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
     <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${esc(payLabel(s))}</span></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
@@ -324,7 +325,7 @@ export function profileBlock(w, own) {
   const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + w.license.join(', ')]].filter(([, , v]) => v);
   const feats = [w.medbook && pill('heart', 'Медкнижка'), w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
   const skills = (w.skills || []).map((s) => `<span class="pill plain">${esc(s)}</span>`);
-  return heroCard({ rev: ['worker', w.user_id, w.reviews], av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
+  return heroCard({ rev: ['worker', w.user_id, w.reviews], pro: w.pro, av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
       stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
     + (w.about ? `<div class="about">${esc(w.about)}</div>` : '') + infoRows(rows)
     + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')
@@ -337,13 +338,13 @@ async function profile(ctx) {
   ctx.render(`${profileBlock(w, true)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${w.percent < 100 ? `<p class="mut sm" style="margin:12px 0 0">Чем полнее профиль, тем больше доверия подрядчиков и выше позиция в поиске.</p>` : ''}</div>
-    ${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+    ${proCard(u)}${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
 }
 // «Помощь и документы»: политика, соглашение, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
 export function helpBlock() {
   const link = (ic, t, act, extra = '') => `<div class="irow click" data-act="${act}" ${extra}><span class="ico">${ICON[ic]}</span><span class="k" style="color:var(--txt);font-size:15px">${t}</span><span class="v mut">›</span></div>`;
-  return `<div class="sect">Помощь и документы</div><div class="info">${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}${S.cfg && S.cfg.support_url ? link('chats', 'Написать в поддержку', 'support') : ''}</div>
+  return `<div class="sect">Ощущения</div><div class="card"><div class="row sp"><span>Вибрация</span>${toggle(prefs.haptic, 'setHaptic')}</div><div class="row sp" style="margin-top:12px"><span>Звуки</span>${toggle(prefs.sound, 'setSound')}</div></div><div class="sect">Помощь и документы</div><div class="info">${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}${S.cfg && S.cfg.support_url ? link('chats', 'Написать в поддержку', 'support') : ''}</div>
     <button class="btn danger block" data-act="delAccount" style="margin-top:14px">Удалить аккаунт</button>`;
 }
 export function roleSwitch() {
@@ -358,6 +359,9 @@ export function devPanel(u) {
     <button class="btn danger sm" data-act="devreset" style="margin-top:10px">Стереть все локальные данные</button></div>${u.is_admin ? '<button class="btn block ghost" data-act="admin">Админ-панель</button>' : ''}`;
 }
 export function bindCommonProfile(ctx, u) {
+  ctx.acts.topro = () => go('#/pro');
+  ctx.acts.setHaptic = (el) => { el.classList.toggle('on'); prefs.set('haptic', el.classList.contains('on')); haptic('medium'); };
+  ctx.acts.setSound = (el) => { el.classList.toggle('on'); prefs.set('sound', el.classList.contains('on')); tick('ok'); };
   ctx.acts.legal = (el) => openLegal(el.dataset.u);
   ctx.acts.support = () => {
     const url = S.cfg.support_url;

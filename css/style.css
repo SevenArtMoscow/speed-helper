@@ -296,3 +296,34 @@ button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:
 .stats3 button.st{font:inherit;color:inherit;text-align:center;cursor:pointer;width:100%}
 .stats3 .st.click span{color:var(--g)}
 .stats3 .st.click:active{transform:scale(.96)}
+
+/* ===== PRO ===== */
+:root{--gold:#ffd24a;--gold2:#ff9f1a}
+.pro-b{display:inline-flex;align-items:center;gap:4px;padding:3px 9px 3px 7px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.4px;color:#2b1a00;background:linear-gradient(120deg,#ffe68a,var(--gold),var(--gold2));box-shadow:0 0 12px rgba(255,190,50,.35);vertical-align:1px}
+.pro-b svg{width:13px;height:13px;stroke:#2b1a00;stroke-width:2.4}
+.avring.pro{background:conic-gradient(from 210deg,#ffe68a,var(--gold2),#fff3c0,var(--gold),#ffe68a);box-shadow:0 0 30px rgba(255,190,50,.45);animation:goldspin 6s linear infinite}
+@keyframes goldspin{to{filter:hue-rotate(0deg) brightness(1.12)}}
+.procard{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:12px 0;border-radius:20px;cursor:pointer;background:linear-gradient(120deg,rgba(255,210,74,.14),rgba(255,159,26,.06));border:1px solid rgba(255,210,74,.4)}
+.procard.on{background:linear-gradient(120deg,rgba(255,210,74,.28),rgba(255,159,26,.1));box-shadow:0 0 24px rgba(255,190,50,.2)}
+.procard .pc-ic{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#ffe68a,var(--gold2));color:#2b1a00;flex:none}.procard .pc-ic svg{width:22px;height:22px}
+.procard .pc-go{font-size:24px;color:var(--gold)}
+.prohero{text-align:center;padding:26px 16px 20px;margin:6px 0 14px;border-radius:26px;border:1px solid rgba(255,210,74,.4);background:radial-gradient(120% 100% at 50% 0,rgba(255,210,74,.22),rgba(255,159,26,.05) 60%,transparent),var(--card);position:relative;overflow:hidden}
+.prohero .crown{width:64px;height:64px;border-radius:22px;margin:0 auto 10px;display:grid;place-items:center;background:linear-gradient(135deg,#ffe68a,var(--gold2));color:#2b1a00;box-shadow:0 0 36px rgba(255,190,50,.5)}.prohero .crown svg{width:34px;height:34px}
+.prohero h1{margin:0;font-size:22px}.prohero h1 span{background:linear-gradient(120deg,#ffe68a,var(--gold2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.prohero .price{margin-top:8px;color:var(--mut)}.prohero .price b{font-size:34px;color:#fff}
+.prohero .pro-on{display:inline-block;margin-top:10px;padding:8px 14px;border-radius:999px;background:rgba(57,255,106,.14);color:var(--g);font-weight:700;font-size:13px}
+.prohero::after{content:'';position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.12) 50%,transparent 60%);transform:translateX(-120%);animation:shine 4.5s ease-in-out infinite;pointer-events:none}
+@keyframes shine{0%,55%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+.perk{display:flex;gap:12px;align-items:center;padding:12px 14px;margin:8px 0;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:18px}
+.perk .pk-ic{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;background:rgba(255,210,74,.13);color:var(--gold);flex:none}.perk .pk-ic svg{width:21px;height:21px}
+.perk b{font-size:14px}
+/* ===== ощущения: появление экранов, блик на карточке ===== */
+main.anim>*{animation:rise .42s cubic-bezier(.2,.8,.2,1) both}
+main.anim>*:nth-child(2){animation-delay:.04s}main.anim>*:nth-child(3){animation-delay:.08s}main.anim>*:nth-child(4){animation-delay:.12s}main.anim>*:nth-child(5){animation-delay:.16s}
+main.anim>*:nth-child(6){animation-delay:.2s}main.anim>*:nth-child(7){animation-delay:.24s}main.anim>*:nth-child(n+8){animation-delay:.28s}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+.sc{overflow:hidden}
+.sc::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(115deg,transparent 34%,rgba(255,255,255,.08) 47%,transparent 60%);transform:translateX(calc(var(--dx,0) * .55px))}
+.btn,.chip,.crow,.nt,.perk,.procard{transition:transform .12s,background .2s,border-color .2s,box-shadow .2s}
+.crow:active,.nt:active,.procard:active,.card.click:active{transform:scale(.985)}
+@media (prefers-reduced-motion:reduce){main.anim>*,.prohero::after,.avring.pro{animation:none}}

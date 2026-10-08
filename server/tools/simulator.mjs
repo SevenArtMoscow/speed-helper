@@ -127,6 +127,10 @@ async function ensureUsers() {
   for (const w of W) if (!haveW.has(w.id)) jobs.push(() => call(w.id, 'saveWorker', { name: w.person, city: 'Москва', age: rnd(18, 55), avatar: avatar(w.person), about: chance(0.5) ? 'Ответственный, без вредных привычек' : '', experience: chance(0.6) ? pick(['1 год на складе', '2 года грузчиком', 'Курьер, 3 года', 'Работал на мероприятиях']) : '', skills: [pick(['погрузка', 'уборка', 'сборка', 'курьер', 'кухня', 'монтаж']), pick(['склад', 'мебель', 'доставка', 'инструмент'])], license: chance(0.3) ? ['B'] : [], phone: '', medbook: chance(0.4), selfemployed: chance(0.3), night: chance(0.5), tools: chance(0.3) }));
   for (const c of C) if (!haveC.has(c.id)) jobs.push(() => call(c.id, 'saveContractor', { name: c.person, company: c.name === c.person ? '' : c.name, city: 'Москва', phone: '000000' + String(c.tg).slice(-4).padStart(4, '0'), about: 'Тестовый подрядчик', avatar: chance(0.7) ? avatar(c.name) : null }));
   let k = 0; await Promise.all(Array.from({ length: 6 }, async () => { while (k < jobs.length) { const j = jobs[k++]; const r = await j(); if (!r.ok) log('профиль не создан:', r.status, JSON.stringify(r.body)); } }));
+  // 15% тестовых получают PRO (чтобы были видны значки, приоритеты и «поднятия в топ»)
+  const proIds = [...W.slice(0, Math.ceil(N * 0.15)), ...C.slice(0, Math.ceil(N * 0.15))].map((u) => u.id);
+  await q(`insert into subscriptions(user_id, expires_at, source, note) select unnest($1::bigint[]), now() + interval '30 days', 'admin', 'симулятор' on conflict (user_id) do nothing`, [proIds]);
+  PRO_C = C.slice(0, Math.ceil(N * 0.15));
   log(`Тестовые пользователи готовы: ${W.length} исполнителей, ${C.length} подрядчиков (профилей создано: ${jobs.length})`);
 }
 
@@ -147,6 +151,13 @@ function genShift() {
 
 // ---------- действия ----------
 const pend = { creating: 0 };
+let PRO_C = [];
+// PRO-подрядчик поднимает свою смену в топ (лимит 3 в месяц на человека)
+async function aBoost() {
+  if (!PRO_C.length) return; const c = pick(PRO_C);
+  const [s] = await q(`select id from shifts where contractor_id = $1 and status = 'open' and (boosted_until is null or boosted_until < now()) order by random() limit 1`, [c.id]);
+  if (s) await call(c.id, 'boostShift', Number(s.id));
+}
 async function aCreate() {
   const [{ n }] = await q(`select count(*)::int as n from shifts s where s.status in ('open','full') and s.contractor_id = any($1)`, [C.map((c) => c.id)]);
   if (n >= CAP) return aComplete(true);
@@ -255,7 +266,7 @@ function startPollers() {
   log(`Включён опрос «открытых приложений»: ${online.length} пользователей каждые ~4 с (≈${Math.round(online.length / 4)} запросов/с)`);
 }
 
-const ACTIONS = [[aBrowse, 22], [aApply, 16], [aSkipSave, 7], [aWorkerMisc, 6], [aContractorMisc, 5], [aCreate, 8], [aDecide, 12], [aChat, 12], [aComplete, 4], [aReview, 5], [aWithdrawOrFav, 3]];
+const ACTIONS = [[aBrowse, 22], [aApply, 16], [aSkipSave, 7], [aWorkerMisc, 6], [aContractorMisc, 5], [aCreate, 8], [aDecide, 12], [aChat, 12], [aComplete, 4], [aReview, 5], [aWithdrawOrFav, 3], [aBoost, 1]];
 const TOTW = ACTIONS.reduce((a, x) => a + x[1], 0);
 const pickAction = () => { let r = Math.random() * TOTW; for (const [f, w] of ACTIONS) { if ((r -= w) < 0) return f; } return ACTIONS[0][0]; };
 

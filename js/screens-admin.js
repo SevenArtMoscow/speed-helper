@@ -17,8 +17,8 @@ async function admin(ctx, tab = 'stats') {
   }
   if (tab === 'users') {
     const l = await api.adminUsers();
-    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}${u.is_fake ? ' <span class="tag">тест</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
-      <div class="row gap">${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
+    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}${u.is_fake ? ' <span class="tag">тест</span>' : ''}${u.pro ? ' <span class="tag y">PRO</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
+      <div class="row gap wrap"><button class="btn sm ${u.pro ? '' : 'pri'}" data-act="${u.pro ? 'unpro' : 'pro'}" data-id="${u.id}">${u.pro ? 'Снять PRO' : 'PRO 30 дн.'}</button>${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
   }
   if (tab === 'shifts') {
     const l = await api.adminShifts();
@@ -44,6 +44,8 @@ async function admin(ctx, tab = 'stats') {
   ctx.acts.t = (el) => admin(ctx, el.dataset.t);
   ctx.acts.block = async (el) => { const b = el.dataset.b === '1'; if (b && !(await confirmBox('Заблокировать аккаунт?', { danger: true, ok: 'Заблокировать' }))) return; await api.adminBlock(Number(el.dataset.id), b); toast('Готово', 'ok'); re(); };
   ctx.acts.ver = run(async (el) => { const v = el.dataset.v === '1'; await api.adminVerify(Number(el.dataset.id), v); toast(v ? 'Статус «Проверенный подрядчик» выдан' : 'Статус «Проверенный» снят', 'ok'); });
+  ctx.acts.pro = run(async (el) => { await api.adminGrantPro(Number(el.dataset.id), 30); toast('PRO выдана на 30 дней', 'ok'); });
+  ctx.acts.unpro = run(async (el) => { await api.adminRevokePro(Number(el.dataset.id)); toast('PRO снята', 'ok'); });
   ctx.acts.hide = run(async (el) => { const h = el.dataset.h === '1'; await api.adminHideShift(Number(el.dataset.id), h); toast(h ? 'Объявление скрыто' : 'Объявление снова видно', 'ok'); });
   ctx.acts.rep = run(async (el) => { await api.adminResolveReport(Number(el.dataset.id), el.dataset.s); toast('Статус жалобы обновлён', 'ok'); });
   ctx.acts.catact = run(async (el) => { await api.adminSaveCategory({ id: Number(el.dataset.id), name: el.dataset.n, active: el.dataset.a === '1' }); S.cats = await api.categories(); toast(el.dataset.a === '1' ? 'Категория снова доступна' : 'Категория скрыта', 'ok'); });

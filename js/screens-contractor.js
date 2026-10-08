@@ -1,6 +1,6 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
@@ -222,15 +222,15 @@ async function shiftPage(ctx, id) {
     const [s, apps] = await Promise.all([api.getShift(id), api.applicants(id)]);
     const active = ['open', 'full'].includes(s.status), owner = s.contractor_id === S.user.id;
     const groups = [['pending', 'Новые отклики'], ['accepted', 'Приняты'], ['completed', 'Участвовали'], ['rejected', 'Отклонены'], ['cancelled', 'Отказались / исключены']];
-    const html = `${pageHead('Смена')}<div class="card"><div class="row sp"><h2 style="margin:0">${esc(s.title)}</h2>${statusTag(s.status)}</div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}${payNote(s) ? ` (${esc(payNote(s))})` : ''}<br>${esc(s.address)}</div>
+    const html = `${pageHead('Смена')}<div class="card"><div class="row sp"><h2 style="margin:0">${esc(s.title)}</h2><span>${s.boosted ? '<span class="tag o">⚡ В топе</span> ' : ''}${statusTag(s.status)}</span></div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}${payNote(s) ? ` (${esc(payNote(s))})` : ''}<br>${esc(s.address)}</div>
       <div class="row sp sm"><span>👥 ${s.accepted_count} / ${s.people}</span></div><div class="bar" style="margin:6px 0"><i style="width:${Math.min(100, (s.accepted_count / s.people) * 100)}%"></i></div>
       ${s.description ? `<p class="mut sm">${esc(s.description)}</p>` : ''}${(s.requirements || []).map((r) => `<span class="tag">${esc(r)}</span> `).join('')}
-      ${active ? (owner ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button><button class="btn sm danger" data-act="cancel">Отменить</button></div>' : '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда и чат</button></div><p class="mut sm">Вы — админ чата этой смены: можно принимать и отклонять отклики.</p>') : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
+      ${active ? (owner ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button><button class="btn sm" data-act="boost">⚡ В топ</button><button class="btn sm danger" data-act="cancel">Отменить</button></div>' : '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда и чат</button></div><p class="mut sm">Вы — админ чата этой смены: можно принимать и отклонять отклики.</p>') : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
       <h2>Отклики · ${apps.length}</h2>${apps.length ? groups.map(([st, t]) => { const l = apps.filter((a) => a.status === st); return l.length ? `<div class="mut sm" style="margin:12px 0 4px">${t} · ${l.length}</div>` + l.map((a) => cand(a, active, s.status === 'open')).join('') : ''; }).join('') : '<p class="mut">Пока никто не откликнулся.</p>'}`;
     if (ctx.main.dataset.h !== html && !document.querySelector('.ov')) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
     ctx.shiftData = { s, apps };
   };
-  const cand = (a, active, canAccept) => { const w = a.worker || {}; return `<div class="card"><div class="row click" data-act="prof" data-id="${a.worker_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div>${(w.skills || []).length ? `<div class="mut sm">${esc(w.skills.slice(0, 4).join(', '))}</div>` : ''}</div>${statusTag(a.status)}</div>
+  const cand = (a, active, canAccept) => { const w = a.worker || {}; return `<div class="card"><div class="row click" data-act="prof" data-id="${a.worker_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${w.pro ? proBadge() : ''}${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div>${(w.skills || []).length ? `<div class="mut sm">${esc(w.skills.slice(0, 4).join(', '))}</div>` : ''}</div>${statusTag(a.status)}</div>
     <div class="row gap" style="margin-top:10px"><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button>${a.status === 'pending' && active ? `<button class="btn sm danger" data-act="dec" data-app="${a.id}" data-d="rejected" data-n="${esc(w.name)}">Отклонить</button>${canAccept ? `<button class="btn sm pri" data-act="dec" data-app="${a.id}" data-d="accepted" data-n="${esc(w.name)}">Принять</button>` : ''}` : ''}</div></div>`; };
   ctx.main.dataset.h = ''; await load(); ctx.poll = load;
   ctx.acts.edit = () => go('#/c/edit/' + id);
@@ -244,6 +244,13 @@ async function shiftPage(ctx, id) {
     await api.decide(Number(el.dataset.app), el.dataset.d); track(ok ? 'application_accepted' : 'application_rejected'); toast(ok ? 'Исполнитель принят и добавлен в команду' : 'Отклик отклонён', 'ok'); await load();
   };
   ctx.acts.fin = () => finishShift(id);
+  // «Поднять в топ»: смена на 6 часов выше всех в ленте (PRO, 3 раза в месяц)
+  ctx.acts.boost = async () => {
+    const sub = await api.mySubscription();
+    if (!sub.active) { if (await confirmBox('Поднять в топ — функция PRO', { ok: 'Что даёт PRO', cancel: 'Закрыть', sub: 'Смена на 6 часов окажется выше всех в ленте. 3 раза в месяц.' })) go('#/pro'); return; }
+    if (!(await confirmBox('Поднять смену в топ?', { ok: 'Поднять', sub: `Смена будет выше всех в ленте 6 часов. Осталось поднятий в этом месяце: ${sub.boosts_limit - sub.boosts_used}.` }))) return;
+    await api.boostShift(id); haptic('success'); tick('done'); toast('Смена в топе ленты на 6 часов ⚡', 'ok'); await load();
+  };
   ctx.acts.cancel = async () => {
     const { s, apps } = ctx.shiftData; const pend = apps.filter((a) => a.status === 'pending').length, acc = apps.filter((a) => a.status === 'accepted').length;
     const sub = acc || pend ? `Есть ${acc ? `принятые исполнители (${acc})` : ''}${acc && pend ? ' и ' : ''}${pend ? `неразобранные отклики (${pend})` : ''}. Все они получат уведомление об отмене.` : '';
@@ -267,16 +274,16 @@ async function workerPage(ctx, wid) {
 
 async function fav(ctx) {
   const list = await api.favorites('worker');
-  ctx.render(`<h1>Избранное</h1><p class="mut sm">Исполнители, с которыми вы хотите работать снова</p>${list.length ? list.map((w) => `<div class="card click row" data-act="p" data-id="${w.user_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>`).join('') : emptyState('Пока пусто', 'Добавляйте исполнителей в избранное в их профиле.')}`);
+  ctx.render(`<h1>Избранное</h1><p class="mut sm">Исполнители, с которыми вы хотите работать снова</p>${list.length ? list.map((w) => `<div class="card click row" data-act="p" data-id="${w.user_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${w.pro ? proBadge() : ''}${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>`).join('') : emptyState('Пока пусто', 'Добавляйте исполнителей в избранное в их профиле.')}`);
   ctx.acts.p = (el) => go('#/c/worker/' + el.dataset.id);
 }
 
 async function profile(ctx) {
   const u = await refreshMe(), c = u.contractor, R = await api.userReviews(u.id, 'contractor', 0).catch(() => null);
-  ctx.render(`${heroCard({ rev: ['contractor', u.id, c.reviews], av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
+  ctx.render(`${heroCard({ rev: ['contractor', u.id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
-    ${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+    ${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');
 }
 

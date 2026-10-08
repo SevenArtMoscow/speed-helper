@@ -134,7 +134,7 @@ const NT = {
   new_application: ['Новый отклик', 'user', 'g'], accepted: ['Вас приняли', 'check', 'g'], rejected: ['Отклик отклонён', 'close', 'r'], shift_cancelled: ['Смена отменена', 'close', 'r'],
   shift_completed: ['Смена завершена — оцените', 'check', 'o'], shift_closed: ['Смена завершена', 'info', 'o'], message: ['Новое сообщение', 'chats', 'b'], review: ['Вам поставили оценку', 'fav', 'y'],
   removed: ['Вас исключили из команды', 'close', 'r'], role: ['Роль в чате', 'shield', 'y'], shift_updated: ['Смена изменена', 'edit', 'y'], member_left: ['Участник отказался', 'user', 'r'],
-  shift_overdue: ['Пора завершить смену', 'clock', 'o'], saved_gone: ['Отложенная смена', 'bookmark', 'y'], new_shift_from_fav: ['Новая смена у вашего подрядчика', 'bolt', 'g'],
+  shift_overdue: ['Пора завершить смену', 'clock', 'o'], pro: ['Подписка PRO', 'crown', 'y'], saved_gone: ['Отложенная смена', 'bookmark', 'y'], new_shift_from_fav: ['Новая смена у вашего подрядчика', 'bolt', 'g'],
 };
 // тело уведомления без повторов заголовка: только «кто / какая смена» и что делать дальше
 const NBODY = (n) => {
@@ -155,7 +155,7 @@ const NBODY = (n) => {
     default: return t;
   }
 };
-const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message']], ['shifts', 'Смены', ['shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
+const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message']], ['shifts', 'Смены', ['pro', 'shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
 async function notifications(ctx) {
   const list = await api.notifications(); let f = 'all';
   const draw = () => {
@@ -328,6 +328,34 @@ export async function finishShift(sid, after) {
   await api.completeShift(sid); track('shift_completed', { id: sid }); toast('Смена завершена', 'ok'); go('#/review/' + sid); if (after) after();
 }
 
+// ---------- подписка PRO ----------
+const PERKS = {
+  w: [['crown', 'Значок PRO и золотая рамка', 'Вас сразу заметно в откликах, чатах и профиле', 1], ['bolt', 'Вы первым в списке откликов', 'Подрядчик сначала видит PRO-исполнителей', 1],
+    ['clock', 'Ранний доступ к новым сменам', 'Видите смены на 15 минут раньше остальных', 0], ['mine', 'Статистика заработка', 'Сколько заработано за месяц, график и лучшие смены', 0], ['bell', 'Уведомления о горячих сменах', 'Срочные смены рядом — сразу к вам', 0]],
+  c: [['crown', 'Значок PRO у профиля и смен', 'Исполнители больше доверяют', 1], ['search', 'Ваши смены выше в ленте', 'В пределах дня PRO-смены показываются раньше', 1], ['bolt', 'Поднять в топ — 3 раза в месяц', 'Смена на 6 часов выше всех в ленте', 1],
+    ['shifts', 'Повтор смены в один клик и шаблоны', 'Публикация за 10 секунд', 0], ['mine', 'Аналитика откликов', 'Просмотры, отклики, принятые', 0], ['chats', 'Приоритетная поддержка', 'Отвечаем в первую очередь', 0]],
+};
+async function proPage(ctx) {
+  const sub = await api.mySubscription(); let who = S.role === 'contractor' ? 'c' : 'w';
+  const draw = () => {
+    const until = sub.expires_at ? new Date(sub.expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+    ctx.main.innerHTML = `${pageHead('PRO')}<div class="prohero"><div class="crown">${ICON.crown}</div><h1>SPEED HELPER <span>PRO</span></h1><div class="price"><b>990 ₽</b> / месяц</div>
+      ${sub.active ? `<div class="pro-on">✓ Подписка активна до ${until}</div>` : '<div class="mut sm" style="margin-top:6px">Больше заказов, больше доверия, выше в ленте</div>'}</div>
+      <div class="tabsx"><span class="chip ${who === 'w' ? 'on' : ''}" data-act="pw" data-w="w">Исполнителю</span><span class="chip ${who === 'c' ? 'on' : ''}" data-act="pw" data-w="c">Подрядчику</span></div>
+      ${PERKS[who].map(([ic, t, d, live]) => `<div class="perk"><span class="pk-ic">${ICON[ic]}</span><div class="grow"><b>${t}</b><div class="mut sm">${d}</div></div><span class="tag ${live ? 'g' : 'y'}">${live ? 'Работает' : 'Скоро'}</span></div>`).join('')}
+      ${who === 'c' && sub.active ? `<p class="mut sm">Поднятий в топ в этом месяце: осталось ${sub.boosts_limit - sub.boosts_used} из ${sub.boosts_limit}</p>` : ''}
+      ${sub.active ? '' : '<button class="btn pri block" data-act="buy" style="padding:16px;margin-top:14px">Оформить за 990 ₽ / месяц</button>'}
+      <p class="mut sm" style="margin-top:12px">PRO — необязательные дополнительные возможности. Всем остальным в приложении можно пользоваться бесплатно.</p>`;
+  };
+  draw();
+  ctx.acts.pw = (el) => { who = el.dataset.w; draw(); };
+  ctx.acts.buy = () => {
+    const sh = sheet(`<h3>Оплата подключается</h3><p class="mut sm">Приём платежей за PRO мы подключаем — скоро появится оплата картой прямо в Telegram. Пока PRO можно получить у администратора: напишите нам, и мы подключим её вам.</p>${S.cfg && S.cfg.support_url ? '<button class="btn pri block" id="sup">Написать в поддержку</button>' : ''}<button class="btn ghost block" id="cl" style="margin-top:8px">Понятно</button>`);
+    sh.el.querySelector('#cl').onclick = () => sh.close();
+    const b = sh.el.querySelector('#sup'); if (b) b.onclick = () => { sh.close(); const url = S.cfg.support_url; if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(url)) tg.openTelegramLink(url); else if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener'); };
+  };
+}
+
 // ---------- все отзывы о человеке ----------
 async function reviewsPage(ctx, role, uid) {
   uid = Number(uid);
@@ -368,5 +396,5 @@ async function review(ctx, sid) {
 
 export const commonRoutes = [
   [/^#\/consent$/, consent], [/^#\/welcome$/, welcome], [/^#\/w\/onboard$/, workerForm], [/^#\/w\/edit$/, workerForm], [/^#\/c\/onboard$/, contractorForm], [/^#\/c\/edit-profile$/, contractorForm],
-  [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/review\/(\d+)$/, review], [/^#\/reviews\/(worker|contractor)\/(\d+)$/, reviewsPage],
+  [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/pro$/, proPage], [/^#\/review\/(\d+)$/, review], [/^#\/reviews\/(worker|contractor)\/(\d+)$/, reviewsPage],
 ];

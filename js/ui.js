@@ -1,8 +1,31 @@
 // UI-компоненты, общее состояние
 import { esc, initials, $, fmtPhone } from './util.js';
-import { api } from './api.js';
+import { api, tg } from './api.js';
 
 export const S = { user: null, role: null, cats: [], route: '', cfg: {} };
+
+// ---------- ощущения: вибрация и звук (настройки в профиле; вибрация включена, звук выключен по умолчанию) ----------
+const pref = (k, d) => { try { const v = localStorage.getItem('sh_' + k); return v === null ? d : v === '1'; } catch { return d; } };
+export const prefs = { get haptic() { return pref('haptic', true); }, get sound() { return pref('sound', false); }, set(k, v) { try { localStorage.setItem('sh_' + k, v ? '1' : '0'); } catch {} } };
+export function haptic(kind = 'light') {
+  if (!prefs.haptic) return;
+  try {
+    const h = tg && tg.HapticFeedback;
+    if (h) { if (kind === 'success' || kind === 'error' || kind === 'warning') h.notificationOccurred(kind); else if (kind === 'select') h.selectionChanged(); else h.impactOccurred(kind); }
+    else if (navigator.vibrate) navigator.vibrate(kind === 'error' ? [20, 30, 20] : 8);
+  } catch {}
+}
+let actx = null;
+export function tick(kind = 'tap') {
+  if (!prefs.sound) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    o.type = 'sine'; o.frequency.value = { tap: 520, ok: 760, no: 300, done: 880 }[kind] || 520;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(g).connect(actx.destination); o.start(); o.stop(t + 0.15);
+  } catch {}
+}
 
 export const BOLT = '<svg viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
 // Линейные иконки 24×24 (цвет — currentColor): нижнее меню и шапка
@@ -34,6 +57,7 @@ export const ICON = {
   users: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.4-3.2 2.8-5 5.5-5s5.1 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.6.1 4.2 1.7 4.5 4.3"/>'),
   cal: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
   clock: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  crown: svg('<path d="M4 8l4 4 4-7 4 7 4-4-2 11H6z"/><path d="M6.5 19.5h11"/>'),
   plus: svg('<path d="M12 5v14M5 12h14" stroke-width="2.6"/>'),
   trophy: svg('<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v3M9 20h6M10 16h4l.5 4h-5z"/>'),
   bookmark: svg('<path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/>'),
@@ -43,9 +67,10 @@ export const ICON = {
 // ---------- карточки профиля ----------
 // Шапка: аватар в кольце, имя, теги, плитки статистики [[значение, подпись], …]
 // rev = [роль, id, число отзывов]: первая плитка (оценка) становится кнопкой «Все отзывы»
-export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null }) {
-  return `<div class="hero2"><div class="avring ${verified ? 'ok' : ''}">${avatar(av, name, 'xl')}</div><h1>${esc(name)}</h1>${sub ? `<div class="mut sm">${sub}</div>` : ''}
-    ${tags ? `<div class="row wrap gap ctr" style="margin-top:10px">${tags}</div>` : ''}
+export const proBadge = () => `<span class="pro-b">${ICON.crown}PRO</span>`;
+export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null, pro = false }) {
+  return `<div class="hero2"><div class="avring ${pro ? 'pro' : verified ? 'ok' : ''}">${avatar(av, name, 'xl')}</div><h1>${esc(name)}</h1>${sub ? `<div class="mut sm">${sub}</div>` : ''}
+    ${pro || tags ? `<div class="row wrap gap ctr" style="margin-top:10px">${pro ? proBadge() : ''}${tags}</div>` : ''}
     ${stats.length ? `<div class="stats3">${stats.map(([v, l], i) => (i === 0 && rev && rev[2] > 0 ? `<button class="st click" data-act="allrev" data-role="${rev[0]}" data-id="${rev[1]}" aria-label="Все отзывы"><b>${v}</b><span>${l} ›</span></button>` : `<div class="st"><b>${v}</b><span>${l}</span></div>`)).join('')}</div>` : ''}</div>`;
 }
 // Строка «иконка · подпись · значение»
@@ -61,7 +86,7 @@ export const back = () => { if (history.length > 1) history.back(); else go(S.ro
 export function toast(msg, kind = '') {
   document.querySelectorAll('.toast').forEach((n) => n.remove()); // одновременно виден один тост
   const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg; document.body.appendChild(t);
-  if (navigator.vibrate && kind === 'ok') navigator.vibrate(10);
+  if (kind === 'ok') haptic('success'); else if (kind === 'err') haptic('error');
   setTimeout(() => t.remove(), 2600);
 }
 // показываем только понятные сообщения сервера; технические ошибки (TypeError и т. п.) пользователю не выводим
@@ -149,6 +174,11 @@ export const STATUS = {
   open: ['Открыта', 'g'], full: ['Набрана', 'y'],
 };
 // ---------- отзывы: видно, кто оставил; нажатие ведёт в профиль автора ----------
+// карточка подписки на профиле
+export function proCard(u) {
+  const until = u.pro_until ? new Date(u.pro_until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '';
+  return `<div class="procard ${u.pro ? 'on' : ''}" data-act="topro"><span class="pc-ic">${ICON.crown}</span><div class="grow"><b>${u.pro ? 'SPEED HELPER PRO' : 'Подключить PRO'}</b><div class="sm">${u.pro ? 'Активна до ' + until : 'Значок, приоритет и поднятие в топ · 990 ₽/мес'}</div></div><span class="pc-go">›</span></div>`;
+}
 export const reviewCard = (r) => {
   const fromC = r.from_role === 'contractor', d = new Date(r.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   const crit = Object.entries(r.criteria || {}).filter(([, v]) => v).map(([k, v]) => `<span class="tag">${esc(k)} · ${v}★</span>`).join(' ');

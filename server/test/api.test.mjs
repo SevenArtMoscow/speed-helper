@@ -418,6 +418,32 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await no('REV: нет такого профиля', W3.call('userReviews', 99999, 'worker', 0), 'not_found');
   await no('REV: у человека нет роли подрядчика', W3.call('userReviews', W3.id, 'contractor', 0), 'not_found');
 
+  // ===== подписка PRO =====
+  await ok('PRO: у W3 подписки нет', W3.call('mySubscription'), (b) => b.active === false && b.price === 990 && b.boosts_limit === 3 && b.boosts_used === 0);
+  const PS = await ok('PRO: смена для поднятия', C.call('createShift', { ...sp, title: 'Смена в топ', date: day(12), people: 2 }, key()));
+  await no('PRO: поднять без подписки нельзя', C.call('boostShift', PS.id), 'pro_required');
+  await no('PRO: выдать PRO может только админ', W1.call('adminGrantPro', C.id, 30), 'forbidden');
+  await ok('PRO: админ выдаёт подписку подрядчику C', A.call('adminGrantPro', C.id, 30), (b) => b.expires_at > Date.now());
+  await ok('PRO: у C статус PRO в me и в профиле', C.call('me'), (b) => b.pro === true && b.pro_until > Date.now() && b.contractor.pro === true);
+  await ok('PRO: профиль подрядчика показывает PRO всем', W3.call('contractorPage', C.id), (b) => b.contractor.pro === true);
+  await ok('PRO: уведомление о подключении', C.call('notifications'), (b) => b.some((n) => n.type === 'pro'));
+  await ok('PRO: смена PRO-подрядчика до поднятия — не первая в ленте', W3.call('feed', {}), (b) => b.items.length > 1 && b.items[0].id !== PS.id);
+  await no('PRO: чужую смену поднять нельзя', C2.call('boostShift', PS.id), 'forbidden');
+  await ok('PRO: поднятие в топ', C.call('boostShift', PS.id), (b) => b.boosted === true);
+  await ok('PRO: поднятая смена первая в ленте, хотя дата дальняя', W3.call('feed', {}), (b) => b.items[0].id === PS.id && b.items[0].boosted === true && b.items[0].contractor.pro === true);
+  await ok('PRO: счётчик поднятий', C.call('mySubscription'), (b) => b.active === true && b.boosts_used === 1 && b.source === 'admin');
+  await ok('PRO: второе поднятие', C.call('boostShift', PS.id)); await ok('PRO: третье поднятие', C.call('boostShift', PS.id));
+  await no('PRO: четвёртое — лимит месяца', C.call('boostShift', PS.id), 'limit');
+  // приоритет PRO-исполнителя в откликах
+  const PS2 = await ok('PRO: смена для откликов', C2.call('createShift', { ...sp, title: 'Отклики PRO', date: day(11), people: 3 }, key()));
+  await ok('PRO: W3 откликается первым', W3.call('apply', PS2.id)); await ok('PRO: админ выдаёт PRO исполнителю W2', A.call('adminGrantPro', W2.id, 7));
+  await ok('PRO: W2 откликается позже', W2.call('apply', PS2.id));
+  await ok('PRO: PRO-исполнитель первый в откликах', C2.call('applicants', PS2.id), (b) => b.length === 2 && b[0].worker_id === W2.id && b[0].worker.pro === true && b[1].worker.pro === false);
+  await ok('PRO: в списке админа виден признак PRO', A.call('adminUsers'), (b) => b.find((u) => u.id === W2.id).pro === true && b.find((u) => u.id === W3.id).pro === false);
+  await ok('PRO: продление складывается', A.call('adminGrantPro', W2.id, 7), (b) => b.expires_at > Date.now() + 13 * 864e5);
+  await ok('PRO: админ снимает подписку', A.call('adminRevokePro', W2.id)); await ok('PRO: после снятия не PRO', W2.call('me'), (b) => b.pro === false);
+  await ok('PRO: после поднятия лимит не сбрасывается снятием', C.call('mySubscription'), (b) => b.boosts_used === 3);
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });

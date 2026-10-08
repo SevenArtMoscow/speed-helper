@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
-import { S, logo, go, back, toast, errMsg, skeleton, setBell, ICON } from './ui.js';
+import { S, logo, go, back, toast, errMsg, skeleton, setBell, ICON, haptic } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
@@ -55,6 +55,7 @@ function shell() {
     if (name === 'bell') return go('#/notifications');
     if (name === 'top') return go('#/w/top');
     const fn = ctx.acts[name]; if (!fn) return;
+    haptic('light');
     el.dataset.busy = '1'; // защита от повторных нажатий
     try { await fn(el, e); } catch (err) { console.error(err); toast(errMsg(err), 'err'); } finally { delete el.dataset.busy; }
   });
@@ -69,6 +70,15 @@ export function renderTabs(hash) {
   t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
 }
 
+// плавное появление экрана (карточки выезжают по очереди) и «счётчики» чисел на плитках; при «меньше движения» в системе — без анимации
+function rise(main) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  main.classList.add('anim'); setTimeout(() => main.classList.remove('anim'), 700);
+  main.querySelectorAll('.stat b, .stats3 .st b').forEach((b) => {
+    const t = b.textContent.trim(); if (!/^\d{1,6}$/.test(t)) return; const to = +t, t0 = performance.now();
+    (function f(now) { const k = Math.min(1, (now - t0) / 700), e = 1 - Math.pow(1 - k, 3); b.textContent = k < 1 ? Math.round(to * e) : t; if (k < 1) requestAnimationFrame(f); })(t0);
+  });
+}
 let navToken = 0;
 async function route() {
   const hash = location.hash || '#/';
@@ -89,7 +99,7 @@ async function route() {
     if (S.user && S.user.terms_accepted === false && h !== '#/consent') { h = '#/consent'; if (location.hash !== h) history.replaceState(null, '', h); }
     for (const [re, fn] of ROUTES) {
       const m = h.match(re);
-      if (m) { renderTabs(h); await fn(ctx, ...m.slice(1)); if (my !== navToken) return; ctx.main.scrollTop = 0; track('screen', { r: h.split('/').slice(0, 3).join('/') }); return; }
+      if (m) { renderTabs(h); await fn(ctx, ...m.slice(1)); if (my !== navToken) return; ctx.main.scrollTop = 0; rise(ctx.main); track('screen', { r: h.split('/').slice(0, 3).join('/') }); return; }
     }
     go('#/');
   } catch (e) {
