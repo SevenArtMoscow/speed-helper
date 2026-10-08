@@ -9,11 +9,16 @@ const WELCOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..',
 const API = process.env.TG_API || 'https://api.telegram.org';
 
 export function startBot({ pool, token, appUrl, admins = [] }) {
+  // Сетевой сбой (DNS, обрыв) — пробуем ещё до 3 раз с паузой; ответ Telegram с ошибкой (есть status) повторять не нужно. getUpdates повторяет цикл опроса.
   const tg = async (method, body) => {
-    const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-    const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
-    if (!j.ok) throw Object.assign(new Error(`${method}: ${j.description}`), { status: res.status, retryAfter: j.parameters?.retry_after });
-    return j.result;
+    for (let i = 1; ; i++) {
+      try {
+        const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+        const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
+        if (!j.ok) throw Object.assign(new Error(`${method}: ${j.description}`), { status: res.status, retryAfter: j.parameters?.retry_after });
+        return j.result;
+      } catch (e) { if (e.status || i >= 3 || method === 'getUpdates') throw e; await sleep(600 * 3 ** (i - 1)); }
+    }
   };
   // Ссылка на экран передаётся через ?r=, а не #: в hash Telegram кладёт данные запуска (tgWebAppData)
   const openBtn = (text, link = '') => ({ inline_keyboard: [[{ text, web_app: { url: appUrl + (link ? '/?r=' + encodeURIComponent(link.replace(/^#/, '')) : '') } }]] });
@@ -99,7 +104,8 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
     }
   }
 
-  setup().catch((e) => console.error('bot setup failed', e.message));
+  // стартовая настройка бота (команды, кнопка меню): при сбое сети повторяем, пока не получится
+  (async () => { for (let i = 0; i < 30; i++) { try { await setup(); return; } catch (e) { console.error('bot setup failed', e.message); await sleep(10000); } } })();
   poll();
   notifyLoop();
   // оповещение владельцев (сбои, перезапуски); не падает, если кто-то из них не запускал бота
