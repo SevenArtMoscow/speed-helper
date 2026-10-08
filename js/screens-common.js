@@ -1,7 +1,8 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession, tg } from './api.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
-import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel } from './util.js';
+import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel, shortTime, dayLabel } from './util.js';
+import { ICON } from './ui.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
 export const shiftName = (s) => `${s.title} · ${dateLabel(s.date)}`;
@@ -128,23 +129,79 @@ async function contractorForm(ctx) {
 }
 
 // ---------- уведомления ----------
+// тип → [заголовок, иконка, цвет]; одинаковый вид для всех, чтобы сразу было понятно, что случилось
+const NT = {
+  new_application: ['Новый отклик', 'user', 'g'], accepted: ['Вас приняли', 'check', 'g'], rejected: ['Отклик отклонён', 'close', 'r'], shift_cancelled: ['Смена отменена', 'close', 'r'],
+  shift_completed: ['Смена завершена — оцените', 'check', 'o'], shift_closed: ['Смена завершена', 'info', 'o'], message: ['Новое сообщение', 'chats', 'b'], review: ['Вам поставили оценку', 'fav', 'y'],
+  removed: ['Вас исключили из команды', 'close', 'r'], role: ['Роль в чате', 'shield', 'y'], shift_updated: ['Смена изменена', 'edit', 'y'], member_left: ['Участник отказался', 'user', 'r'],
+  shift_overdue: ['Пора завершить смену', 'clock', 'o'], saved_gone: ['Отложенная смена', 'bookmark', 'y'], new_shift_from_fav: ['Новая смена у вашего подрядчика', 'bolt', 'g'],
+};
+// тело уведомления без повторов заголовка: только «кто / какая смена» и что делать дальше
+const NBODY = (n) => {
+  const t = n.text || '', shift = (t.match(/«[^»]+»/) || [''])[0];
+  switch (n.type) {
+    case 'message': { const m = t.match(/^(.*?): новое сообщение в («.*»)$/); return m ? `${m[1]} · ${m[2]}` : t; }
+    case 'new_application': { const m = t.match(/^Новый отклик: (.*?) — («.*»)$/); return m ? `${m[1]} · ${m[2]}` : t; }
+    case 'shift_completed': return `${shift} — оцените подрядчика (можно пропустить)`;
+    case 'shift_closed': return `${shift} — ваш отклик не был рассмотрен`;
+    case 'shift_cancelled': return `${shift} — подрядчик отменил смену`;
+    case 'accepted': return `${shift} — вы в команде смены`;
+    case 'rejected': return `${shift} — подрядчик отклонил отклик`;
+    case 'removed': return `${shift} — вас исключили из команды`;
+    case 'shift_updated': return `${shift} — условия обновились, проверьте`;
+    case 'shift_overdue': return `${shift} — завершите её и оцените исполнителей`;
+    case 'member_left': { const m = t.match(/^(.*?) отказался от смены («.*»)$/); return m ? `${m[1]} · ${m[2]}` : t; }
+    case 'review': return 'Откройте профиль, чтобы посмотреть оценку';
+    default: return t;
+  }
+};
+const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message']], ['shifts', 'Смены', ['shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
 async function notifications(ctx) {
-  const list = await api.notifications();
-  ctx.render(`${pageHead('Уведомления')}${list.length ? list.map((n) => `<div class="card click" data-act="open" data-l="${esc(n.link || '')}" style="${n.read ? 'opacity:.7' : 'border-color:var(--g)'}"><div>${esc(n.text)}</div><div class="mut sm">${timeAgo(n.at)}</div></div>`).join('') : emptyState('Пока нет уведомлений')}`);
+  const list = await api.notifications(); let f = 'all';
+  const draw = () => {
+    const g = NGROUP.find((x) => x[0] === f), l = g[2] ? list.filter((n) => g[2].includes(n.type)) : list;
+    const chips = NGROUP.map(([k, t, types]) => { const c = (types ? list.filter((n) => types.includes(n.type)) : list); const u = c.filter((n) => !n.read).length; return `<span class="chip ${f === k ? 'on' : ''}" data-act="nf" data-f="${k}">${t}${u ? ` · <b>${u}</b>` : ''}</span>`; }).join('');
+    let last = '', body = '';
+    for (const n of l) {
+      const day = dayLabel(n.at); if (day !== last) { body += `<div class="nday">${day}</div>`; last = day; }
+      const [title, ic, col] = NT[n.type] || ['Уведомление', 'info', ''];
+      body += `<div class="nt ${n.read ? '' : 'new'}" data-act="open" data-l="${esc(n.link || '')}"><span class="nic ${col}">${ICON[ic] || ICON.info}</span><div class="nb"><div class="nh"><b>${title}</b><span class="ntime">${hhmm(n.at)}</span></div><div class="nx">${esc(NBODY(n))}</div></div>${n.read ? '' : '<i class="dot"></i>'}</div>`;
+    }
+    ctx.main.innerHTML = `${pageHead('Уведомления')}<p class="mut sm" style="margin:0 0 8px">Сюда приходят отклики, решения подрядчиков, сообщения в чатах и напоминания о сменах. То же самое приходит и в Telegram. Нажмите, чтобы открыть.</p><div class="tabsx">${chips}</div>${l.length ? body : emptyState(list.length ? 'В этой группе пусто' : 'Пока нет уведомлений', list.length ? '' : 'Когда что-то произойдёт — отклик, ответ подрядчика, сообщение — вы увидите это здесь.')}`;
+  };
+  draw();
+  ctx.acts.nf = (el) => { f = el.dataset.f; draw(); };
   ctx.acts.open = (el) => el.dataset.l && go(el.dataset.l);
-  await api.markRead(); await refreshMe();
+  api.markRead().then(() => refreshMe()).catch(() => {}); // подсветка «новых» остаётся на экране, значок на колокольчике гаснет
 }
 
-// ---------- список диалогов ----------
+// ---------- список чатов: вкладки «Команды» и «Личные», сверху самые свежие ----------
 async function chats(ctx) {
-  const render = async () => {
-    const [dms, teams] = await Promise.all([api.myDialogs(S.role), S.role === 'contractor' ? api.myShifts() : api.myTeams()]);
-    const teamList = (S.role === 'contractor' ? teams.filter((s) => s.accepted_count > 0 && s.status !== 'cancelled') : teams);
-    const html = `<h1>Чаты</h1><h2>Команды смен</h2>${teamList.length ? teamList.map((s) => `<div class="card click row" data-act="team" data-id="${s.id}"><div class="grow"><b>${esc(shiftName(s))}</b><div class="mut sm">${s.accepted_count} / ${s.people} чел.</div></div>›</div>`).join('') : '<p class="mut">Команда появится после принятия отклика.</p>'}
-      <h2>Личные</h2>${dms.length ? dms.map((d) => `<div class="card click row" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="grow"><b>${esc(d.info.title)}</b><span class="rt ${S.role === 'contractor' ? 'worker' : 'owner'}" style="margin-left:6px">${S.role === 'contractor' ? 'Исполнитель' : 'Подрядчик'}</span><div class="mut sm">${esc(d.info.shift.title)}</div><div class="sm ${d.last ? '' : 'mut'}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.last ? esc(d.last.text) : 'Нет сообщений — напишите первым'}</div></div><span class="mut sm">${d.last ? hhmm(d.last.at) : ''}</span></div>`).join('') : `<p class="mut">${S.role === 'contractor' ? 'Здесь появятся чаты с исполнителями, которые откликнулись на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.'}</p>`}`;
-    if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
+  let tab = sessionStorage.getItem('sh_chtab') || '', teams = [], dms = [];
+  const other = S.role === 'contractor' ? ['Исполнитель', 'worker'] : ['Подрядчик', 'owner'];
+  const preview = (last, mine) => last ? `<div class="cprev">${last.mine || mine ? '<span class="you">Вы:</span> ' : last.name ? `<span class="you">${esc(String(last.name).split(' ')[0])}:</span> ` : ''}${esc(last.text)}</div>` : '<div class="cprev mut">Сообщений пока нет — напишите первым</div>';
+  const draw = () => {
+    const tUn = teams.filter((x) => x.unread).length, dUn = dms.filter((x) => x.unread).length;
+    const tabs = `<div class="tabsx"><span class="chip ${tab === 'team' ? 'on' : ''}" data-act="ctab" data-t="team">Команды смен · ${teams.length}${tUn ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'dm' ? 'on' : ''}" data-act="ctab" data-t="dm">Личные · ${dms.length}${dUn ? ' <i class="dot"></i>' : ''}</span></div>`;
+    let body;
+    if (tab === 'team') body = teams.length ? teams.map((s) => {
+      const end = s.status === 'completed' ? '<span class="tag o">Завершена</span>' : '';
+      return `<div class="crow click ${s.unread ? 'un' : ''}" data-act="team" data-id="${s.id}"><span class="cav team">${ICON.users}</span><div class="cb"><div class="ctop"><b>${esc(s.title)}</b><span class="ctime">${s.last ? shortTime(s.last.at) : ''}</span></div>
+        ${S.role === 'contractor' ? '' : `<div class="csub">${esc(s.contractor?.company || s.contractor?.name || '')}</div>`}<div class="csub">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${s.accepted_count}/${s.people} чел. ${end}</div>${preview(s.last)}</div>${s.unread ? '<i class="dot"></i>' : ''}</div>`;
+    }).join('') : emptyState('Командных чатов пока нет', S.role === 'contractor' ? 'Чат команды появится, когда вы примете первого исполнителя.' : 'Чат команды появится, когда подрядчик примет ваш отклик.');
+    else body = dms.length ? dms.map((d) => `<div class="crow click ${d.unread ? 'un' : ''}" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="cb"><div class="ctop"><b>${esc(d.info.title)} <span class="rt ${other[1]}">${other[0]}</span></b><span class="ctime">${d.last ? shortTime(d.last.at) : ''}</span></div>
+        <div class="csub">${esc(d.info.shift.title)} · ${esc(dateLabel(d.info.shift.date))} ${statusTag(d.info.application.status)}</div>${preview(d.last ? { text: d.last.text, mine: d.last.user_id === getSession().me, name: d.last.name } : null)}</div>${d.unread ? '<i class="dot"></i>' : ''}</div>`).join('')
+      : emptyState('Личных чатов пока нет', S.role === 'contractor' ? 'Здесь появятся переписки с исполнителями, откликнувшимися на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.');
+    const html = `<h1>Чаты</h1>${tabs}${body}`;
+    if (ctx.main.dataset.h !== html) { const st = ctx.main.scrollTop; ctx.main.innerHTML = html; ctx.main.dataset.h = html; ctx.main.scrollTop = st; }
   };
-  ctx.main.dataset.h = ''; await render(); ctx.poll = render;
+  const load = async () => {
+    [teams, dms] = await Promise.all([api.teamChats(S.role), api.myDialogs(S.role)]);
+    if (!tab) tab = dms.some((d) => d.unread) && !teams.some((t) => t.unread) ? 'dm' : !teams.length && dms.length ? 'dm' : 'team';
+    draw();
+  };
+  ctx.main.dataset.h = ''; await load(); ctx.poll = load;
+  ctx.acts.ctab = (el) => { tab = el.dataset.t; sessionStorage.setItem('sh_chtab', tab); draw(); };
   ctx.acts.team = (el) => go('#/team/' + el.dataset.id);
   ctx.acts.dm = (el) => go('#/chat/' + el.dataset.id);
 }
@@ -166,13 +223,16 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
     if (list.length && (near || last === list[list.length - 1].id)) box.scrollTop = box.scrollHeight;
   };
   const pinBar = (list) => { const p = list.find((m) => m.pinned); const el = document.getElementById('pin'); if (el) { el.hidden = !p; if (p) el.textContent = '📌 ' + p.text; } };
+  const chatLink = scope.startsWith('shift:') ? '#/team/' + scope.slice(6) : '#/chat/' + scope.slice(3);
+  const seenChat = () => api.markRead(chatLink).then(() => refreshMe()).catch(() => {});
+  seenChat();
   add(await api.messages(scope, 0));
   const all = () => Object.values(cache);
   // закреплённое сообщение запрашивается отдельно: его могли закрепить/открепить без новых сообщений, а оно может быть старше загруженных
   const syncPin = async () => { const p = await api.messages(scope, 0, 'pin'); Object.values(cache).forEach((x) => (x.pinned = false)); p.forEach((x) => { (cache[x.id] = cache[x.id] || x).pinned = true; }); pinBar(all()); };
   const team = scope.startsWith('shift:');
   if (team) await syncPin().catch(() => pinBar(all())); else pinBar(all());
-  ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (team) await syncPin(); };
+  ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (l.length) seenChat(); if (team) await syncPin(); };
   // Отправка: кнопка, Enter и клавиша «Отправить» на телефоне идут через submit формы.
   // На телефоне касание кнопки обрабатываем сразу (touchstart) и не даём полю потерять фокус:
   // иначе первое касание лишь прячет клавиатуру, экран перестраивается и нажатие теряется.

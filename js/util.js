@@ -47,6 +47,12 @@ export function timeAgo(ts) {
   if (s < 86400) return `${Math.floor(s / 3600)} ч назад`;
   return new Date(ts).toLocaleDateString('ru-RU');
 }
+// короткое время для списков: сегодня — 14:05, вчера — «вчера», раньше — 05.10
+export const shortTime = (ts) => {
+  const d = new Date(ts), now = new Date(), day = (x) => Math.floor((x.getTime() - x.getTimezoneOffset() * 6e4) / 864e5);
+  const diff = day(now) - day(d); if (diff <= 0) return `${pad(d.getHours())}:${pad(d.getMinutes())}`; if (diff === 1) return 'вчера'; return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}`;
+};
+export const dayLabel = (ts) => { const d = new Date(ts), now = new Date(), day = (x) => Math.floor((x.getTime() - x.getTimezoneOffset() * 6e4) / 864e5), diff = day(now) - day(d); return diff <= 0 ? 'Сегодня' : diff === 1 ? 'Вчера' : `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 export const hhmm = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 export const debounce = (fn, ms = 250) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };

@@ -252,3 +252,40 @@ button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:
 .lb .sc{margin-left:auto;text-align:right;flex:none}.lb .sc b{display:block;font-size:18px;color:var(--g)}.lb .sc span{font-size:11px;color:var(--mut)}
 .lb.me{border-color:var(--g);box-shadow:0 0 0 1px rgba(57,255,106,.4)}
 .topbtn svg{width:24px;height:24px;color:var(--or)}
+
+/* ===== единые кнопки под карточкой: четыре одинаковых круга с подписями ===== */
+.actions{display:flex;justify-content:center;gap:14px;align-items:flex-start;margin:10px 0 4px}
+.rbw{display:flex;flex-direction:column;align-items:center;gap:6px;width:70px}
+.rbw span{font-size:11px;color:var(--mut);letter-spacing:.2px}
+.rb,.rb.undo,.rb.save,.rb.no,.rb.ok{width:60px;height:60px;border-radius:50%;border:2px solid;background:var(--card);padding:0;display:grid;place-items:center;font-size:0;box-shadow:none}
+.rb svg{width:26px;height:26px;stroke-width:2.4}
+.rb.undo{color:var(--yel);border-color:rgba(255,204,51,.7)}.rb.no{color:var(--red);border-color:rgba(255,77,94,.75)}.rb.save{color:#7cc4ff;border-color:rgba(124,196,255,.75)}.rb.ok{color:var(--g);border-color:rgba(57,255,106,.8)}
+.rb.undo svg,.rb.no svg,.rb.save svg,.rb.ok svg{width:26px;height:26px}
+.rb.ok{background:rgba(57,255,106,.1)}.rb.no{background:rgba(255,77,94,.08)}.rb.save{background:rgba(124,196,255,.08)}.rb.undo{background:rgba(255,204,51,.07)}
+.rb:active{transform:scale(.92)}
+.rb[disabled]{opacity:.28}.rbw:has(.rb[disabled]) span{opacity:.4}
+/* строки карточки смены с иконками */
+.lns{display:grid;gap:8px;margin:2px 0 4px}
+.ln{display:flex;align-items:flex-start;gap:10px;font-size:14px;line-height:1.35;color:#e6eaee}
+.ln svg{width:18px;height:18px;flex:none;color:var(--g);margin-top:1px}
+/* точка «непрочитано» */
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--g);box-shadow:0 0 8px rgba(57,255,106,.7);flex:none;font-style:normal}
+.chip .dot{width:7px;height:7px;margin-left:3px;vertical-align:1px}
+/* список чатов */
+.crow{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:8px 0;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:20px}
+.crow.un{border-color:rgba(57,255,106,.4);background:linear-gradient(120deg,rgba(57,255,106,.07),var(--card) 60%)}
+.crow .cb{min-width:0;flex:1}.crow .ctop{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.crow .ctop b{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crow .ctime{font-size:11px;color:var(--mut);flex:none}
+.crow .csub{font-size:12px;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow .cprev{font-size:13px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#d6dbe0}.crow .cprev.mut{color:var(--mut)}.crow .cprev .you{color:var(--g)}
+.crow.un .cprev{color:#fff;font-weight:600}
+.cav{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;flex:none}
+.cav.team{background:rgba(57,255,106,.12);color:var(--g)}.cav svg{width:24px;height:24px}
+/* уведомления */
+.nday{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:16px 4px 6px}
+.nt{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:6px 0;background:var(--card);border:1px solid rgba(255,255,255,.06);border-radius:18px;cursor:pointer}
+.nt.new{border-color:rgba(57,255,106,.4);background:linear-gradient(120deg,rgba(57,255,106,.07),var(--card) 60%)}
+.nt .nb{min-width:0;flex:1}.nt .nh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.nt .nh b{font-size:14px}.nt .ntime{font-size:11px;color:var(--mut);flex:none}
+.nt .nx{font-size:13px;color:#cdd3d9;margin-top:3px;line-height:1.35}
+.nic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--card2);color:var(--mut)}.nic svg{width:20px;height:20px}
+.nic.g{background:rgba(57,255,106,.13);color:var(--g)}.nic.r{background:rgba(255,77,94,.14);color:var(--red)}.nic.o{background:rgba(255,159,26,.15);color:var(--or)}.nic.y{background:rgba(255,204,51,.14);color:var(--yel)}.nic.b{background:rgba(124,196,255,.15);color:#7cc4ff}

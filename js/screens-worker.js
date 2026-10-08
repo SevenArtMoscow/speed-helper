@@ -18,7 +18,7 @@ export const shiftCardBody = (s) => `<div class="row sp"><span class="tag g">${e
   <h1 style="margin:10px 0 2px">${esc(s.title)}</h1>
   <div class="row gap wrap sm"><span>${esc(s.contractor?.company || s.contractor?.name || '')}</span>${verifiedTag(s.contractor?.verified, 'Проверенный подрядчик')}<span>${stars(s.contractor?.rating, s.contractor?.reviews)}</span></div>
   <div class="pay" style="margin:12px 0 2px">${esc(payLabel(s))}</div>${payNote(s) ? `<div class="mut sm" style="margin-bottom:6px">${esc(payNote(s))}</div>` : '<div style="height:6px"></div>'}
-  <div class="sm" style="line-height:1.7">🗓 ${esc(dateLabel(s.date))} · ${esc(timeRange(s))}<br>📍 ${esc(s.address)}<br>👥 Нужно ${s.people} ${plural(s.people, 'человек', 'человека', 'человек')} · осталось мест: ${Math.max(0, s.people - s.accepted_count)}</div>
+  <div class="lns"><div class="ln">${ICON.cal}<span>${esc(dateLabel(s.date))} · ${esc(timeRange(s))}</span></div><div class="ln">${ICON.pin}<span>${esc(s.address)}</span></div><div class="ln">${ICON.users}<span>Нужно ${s.people} ${plural(s.people, 'человек', 'человека', 'человек')} · осталось мест: ${Math.max(0, s.people - s.accepted_count)}</span></div></div>
   ${s.description ? `<p class="mut" style="margin:10px 0 6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(s.description)}</p>` : ''}
   ${(s.requirements || []).length ? `<div class="row wrap gap" style="margin-top:6px">${s.requirements.map((r) => `<span class="tag">${esc(r)}</span>`).join('')}</div>` : ''}`;
 
@@ -73,7 +73,7 @@ async function search(ctx) {
 
   function drawDeck(body) {
     if (!queue.length) { body.innerHTML = empty(); return; }
-    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">↺</button><button class="rb no" data-act="skip" aria-label="Пропустить">✕</button><button class="rb save" data-act="save" aria-label="Отложить на потом">${ICON.bookmark}</button><button class="rb ok" data-act="like" aria-label="Откликнуться">✓</button></div><p class="mut sm" style="text-align:center;margin:0">Вправо — откликнуться · влево — пропустить · закладка — отложить</p>`;
+    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><div class="rbw"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">${ICON.undo}</button><span>Вернуть</span></div><div class="rbw"><button class="rb no" data-act="skip" aria-label="Пропустить">${ICON.close}</button><span>Пропуск</span></div><div class="rbw"><button class="rb save" data-act="save" aria-label="Отложить на потом">${ICON.bookmark}</button><span>Отложить</span></div><div class="rbw"><button class="rb ok" data-act="like" aria-label="Откликнуться">${ICON.check}</button><span>Отклик</span></div></div><p class="mut sm" style="text-align:center;margin:0">Свайп вправо — отклик · влево — пропуск</p>`;
     const deck = document.getElementById('deck');
     [queue[1], queue[0]].forEach((s, i) => { if (!s) return; const c = document.createElement('div'); c.className = 'sc' + (i === 0 ? ' behind' : ''); c.dataset.id = s.id; c.innerHTML = `<span class="stamp ok">ОТКЛИК</span><span class="stamp no">ПРОПУСК</span><div class="body">${shiftCardBody(s)}</div><button class="btn ghost sm" data-act="open" data-id="${s.id}" style="margin-top:8px">Подробнее</button>`; deck.appendChild(c); });
     bindDrag(deck.lastElementChild);

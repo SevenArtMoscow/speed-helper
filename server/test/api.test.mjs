@@ -398,6 +398,17 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('FAKE: настоящие данные на месте (смена S1, отклики, рейтинг)', W1.call('getShift', S1.id), (b) => b.title === sp.title);
   await ok('FAKE: настоящий W3 цел и работает', W3.call('myApplications'), (b) => Array.isArray(b) && b.length >= 1);
 
+  // ===== чаты и уведомления: понятные списки =====
+  await ok('W1 пишет в чат команды S1', W1.call('sendMessage', 'shift:' + S1.id, 'Последнее сообщение команды', key()));
+  await ok('CHAT: уведомление называет автора и смену', C.call('notifications'), (b) => b.some((n) => n.type === 'message' && n.link === '#/team/' + S1.id && /Пётр: новое сообщение в «Разгрузка мебели»/.test(n.text)));
+  await ok('CHAT: командные чаты подрядчика — последнее сообщение и «непрочитано»', C.call('teamChats', 'contractor'), (b) => { const x = b.find((s) => s.id === S1.id); return x && x.last.text === 'Последнее сообщение команды' && x.last.name === 'Пётр' && x.unread === true && x.last.mine === false; });
+  await ok('CHAT: у исполнителя своё сообщение помечено «mine»', W1.call('teamChats', 'worker'), (b) => { const x = b.find((s) => s.id === S1.id); return x && x.last.mine === true && x.unread === false; });
+  await ok('CHAT: подрядчик не видит чужие команды', C2.call('teamChats', 'contractor'), (b) => !b.some((s) => s.id === S1.id));
+  await ok('CHAT: markRead по ссылке гасит только этот чат', C.call('markRead', '#/team/' + S1.id));
+  await ok('CHAT: чат прочитан, остальные уведомления целы', C.call('notifications'), (b) => b.filter((n) => n.link === '#/team/' + S1.id).every((n) => n.read) && b.some((n) => !n.read));
+  await ok('CHAT: после прочтения «непрочитано» нет', C.call('teamChats', 'contractor'), (b) => b.find((s) => s.id === S1.id).unread === false);
+  await ok('CHAT: личные чаты помечены «unread»', C.call('myDialogs', 'contractor'), (b) => b.every((d) => typeof d.unread === 'boolean'));
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });
