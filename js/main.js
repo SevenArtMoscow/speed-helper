@@ -66,7 +66,7 @@ export function renderTabs(hash) {
   if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
   t.hidden = false;
   const unread = S.user ? S.user.unread : 0;
-  t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
+  t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
 }
 
 let navToken = 0;

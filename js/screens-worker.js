@@ -308,7 +308,7 @@ async function top(ctx) {
 async function contractorPage(ctx, id) {
   id = Number(id);
   const P = await api.contractorPage(id), c = P.contractor;
-  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
+  ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ rev: ['contractor', id, c.reviews], av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}<button class="btn block ${P.is_fav ? 'favon' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
     <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${esc(payLabel(s))}</span></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
@@ -324,7 +324,7 @@ export function profileBlock(w, own) {
   const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + w.license.join(', ')]].filter(([, , v]) => v);
   const feats = [w.medbook && pill('heart', 'Медкнижка'), w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
   const skills = (w.skills || []).map((s) => `<span class="pill plain">${esc(s)}</span>`);
-  return heroCard({ av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
+  return heroCard({ rev: ['worker', w.user_id, w.reviews], av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
       stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
     + (w.about ? `<div class="about">${esc(w.about)}</div>` : '') + infoRows(rows)
     + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')

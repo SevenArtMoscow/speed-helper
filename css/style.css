@@ -292,3 +292,7 @@ button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:
 
 .rt{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;vertical-align:1px;margin-left:4px}
 .review .rt{margin-left:0}
+
+.stats3 button.st{font:inherit;color:inherit;text-align:center;cursor:pointer;width:100%}
+.stats3 .st.click span{color:var(--g)}
+.stats3 .st.click:active{transform:scale(.96)}

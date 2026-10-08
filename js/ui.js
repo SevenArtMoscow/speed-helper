@@ -42,10 +42,11 @@ export const ICON = {
 
 // ---------- карточки профиля ----------
 // Шапка: аватар в кольце, имя, теги, плитки статистики [[значение, подпись], …]
-export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false }) {
+// rev = [роль, id, число отзывов]: первая плитка (оценка) становится кнопкой «Все отзывы»
+export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null }) {
   return `<div class="hero2"><div class="avring ${verified ? 'ok' : ''}">${avatar(av, name, 'xl')}</div><h1>${esc(name)}</h1>${sub ? `<div class="mut sm">${sub}</div>` : ''}
     ${tags ? `<div class="row wrap gap ctr" style="margin-top:10px">${tags}</div>` : ''}
-    ${stats.length ? `<div class="stats3">${stats.map(([v, l]) => `<div class="st"><b>${v}</b><span>${l}</span></div>`).join('')}</div>` : ''}</div>`;
+    ${stats.length ? `<div class="stats3">${stats.map(([v, l], i) => (i === 0 && rev && rev[2] > 0 ? `<button class="st click" data-act="allrev" data-role="${rev[0]}" data-id="${rev[1]}" aria-label="Все отзывы"><b>${v}</b><span>${l} ›</span></button>` : `<div class="st"><b>${v}</b><span>${l}</span></div>`)).join('')}</div>` : ''}</div>`;
 }
 // Строка «иконка · подпись · значение»
 export const infoRows = (rows) => (rows.length ? `<div class="info">${rows.map(([ic, k, v]) => `<div class="irow"><span class="ico">${ICON[ic]}</span><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>` : '');
