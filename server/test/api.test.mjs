@@ -409,6 +409,15 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('CHAT: после прочтения «непрочитано» нет', C.call('teamChats', 'contractor'), (b) => b.find((s) => s.id === S1.id).unread === false);
   await ok('CHAT: личные чаты помечены «unread»', C.call('myDialogs', 'contractor'), (b) => b.every((d) => typeof d.unread === 'boolean'));
 
+  // ===== отзывы: видно автора, переход в профиль, полный список =====
+  await ok('REV: страница подрядчика — у отзыва виден автор, роль, смена', W3.call('contractorPage', C.id), (b) => { const r = b.reviews[0]; return r && r.from_user === W1.id && r.from_role === 'worker' && r.from_name === 'Пётр' && r.shift_title === sp.title && r.stars === 5 && r.criteria['Условия'] === 5 && r.text === 'Отлично' && typeof r.at === 'number'; });
+  await ok('REV: полный список — всем доступен', C2.call('userReviews', C.id, 'contractor', 0), (b) => b.total === 1 && b.items.length === 1 && b.items[0].from_user === W1.id && b.name.length > 0 && b.rating === 5);
+  await ok('REV: у исполнителя W1 отзыв от подрядчика', C2.call('userReviews', W1.id, 'worker', 0), (b) => b.total === 1 && b.items[0].from_user === C.id && b.items[0].from_role === 'contractor');
+  await ok('REV: отзыв подрядчику не попадает в список «как исполнителю»', W3.call('userReviews', C.id, 'worker', 0), (b) => b.total === 0 && b.items.length === 0);
+  await ok('REV: постранично — смещение за пределы даёт пустой список', W3.call('userReviews', C.id, 'contractor', 20), (b) => b.items.length === 0 && b.total === 1);
+  await no('REV: нет такого профиля', W3.call('userReviews', 99999, 'worker', 0), 'not_found');
+  await no('REV: у человека нет роли подрядчика', W3.call('userReviews', W3.id, 'contractor', 0), 'not_found');
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });

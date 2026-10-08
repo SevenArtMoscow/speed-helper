@@ -2,7 +2,7 @@
 import { api, track, MODE, devUsers, setDevUser, tg } from './api.js';
 import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
 import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, shiftName, openLegal } from './screens-common.js';
@@ -312,7 +312,8 @@ async function contractorPage(ctx, id) {
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}<button class="btn block ${P.is_fav ? 'favon' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
     <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${esc(payLabel(s))}</span></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
-    ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card review"><div class="row sp"><span class="star">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="mut sm">${esc(r.from_name || '')}</span></div>${r.text ? `<div style="margin-top:6px">${esc(r.text)}</div>` : ''}</div>`).join('')}` : ''}`);
+    ${reviewsBlock(P.reviews, c.reviews, 'contractor', id)}`);
+  bindReviews(ctx);
   ctx.acts.fav = async () => { const on = await api.toggleFav(id); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); contractorPage(ctx, id); };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.rep = () => reportSheet('contractor', id);
@@ -331,13 +332,13 @@ export function profileBlock(w, own) {
 }
 async function profile(ctx) {
   const u = await refreshMe(); const w = u.worker, ok = w.percent >= CONFIG.MIN_VERIFIED_PERCENT;
-  const P = await api.workerPage(u.id).catch(() => null);
+  const P = await api.workerPage(u.id).catch(() => null), R = await api.userReviews(u.id, 'worker', 0).catch(() => null);
   const active = P && P.active.length ? sect('Активные задания') + P.active.map((a) => `<div class="card click row sp" data-act="openShift" data-id="${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>›</div>`).join('') : '';
   ctx.render(`${profileBlock(w, true)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${w.percent < 100 ? `<p class="mut sm" style="margin:12px 0 0">Чем полнее профиль, тем больше доверия подрядчиков и выше позиция в поиске.</p>` : ''}</div>
-    ${active}<button class="btn block" data-act="toTop" style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
-  bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
+    ${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
 }
 // «Помощь и документы»: политика, соглашение, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
 export function helpBlock() {

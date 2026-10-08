@@ -289,3 +289,6 @@ button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:
 .nt .nx{font-size:13px;color:#cdd3d9;margin-top:3px;line-height:1.35}
 .nic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--card2);color:var(--mut)}.nic svg{width:20px;height:20px}
 .nic.g{background:rgba(57,255,106,.13);color:var(--g)}.nic.r{background:rgba(255,77,94,.14);color:var(--red)}.nic.o{background:rgba(255,159,26,.15);color:var(--or)}.nic.y{background:rgba(255,204,51,.14);color:var(--yel)}.nic.b{background:rgba(124,196,255,.15);color:#7cc4ff}
+
+.rt{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;vertical-align:1px;margin-left:4px}
+.review .rt{margin-left:0}

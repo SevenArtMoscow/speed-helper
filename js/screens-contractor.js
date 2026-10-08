@@ -1,6 +1,6 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
@@ -259,7 +259,8 @@ async function workerPage(ctx, wid) {
   const activeBlock = P.active.length ? sect('Активные задания') + P.active.map((a) => `<div class="card"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>`).join('') + (P.active_count > P.active.length ? `<p class="mut sm">Всего активных заданий: ${P.active_count}</p>` : '') : P.active_count ? `<p class="mut sm">Сейчас занят на ${P.active_count} ${plural(P.active_count, 'смене', 'сменах', 'сменах')}</p>` : '';
   ctx.render(`${pageHead('Кандидат', '<button class="iconbtn" data-act="rep">⚑</button>')}${profileBlock(w)}${activeBlock}
     <button class="btn block ${P.is_fav ? '' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
-    ${P.reviews.length ? `<h2>Отзывы</h2>${P.reviews.map((r) => `<div class="card review"><div class="row sp"><span class="star">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span><span class="mut sm">${esc(r.from_name || '')}</span></div>${r.text ? `<div style="margin-top:6px">${esc(r.text)}</div>` : ''}</div>`).join('')}` : ''}`);
+    ${reviewsBlock(P.reviews, w.reviews, 'worker', wid)}`);
+  bindReviews(ctx);
   ctx.acts.fav = async () => { const on = await api.toggleFav(wid); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); workerPage(ctx, wid); };
   ctx.acts.rep = () => reportSheet('worker', wid);
 }
@@ -271,12 +272,12 @@ async function fav(ctx) {
 }
 
 async function profile(ctx) {
-  const u = await refreshMe(), c = u.contractor;
+  const u = await refreshMe(), c = u.contractor, R = await api.userReviews(u.id, 'contractor', 0).catch(() => null);
   ctx.render(`${heroCard({ av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
-    <button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
-  bindCommonProfile(ctx, u); ctx.acts.edit = () => go('#/c/edit-profile');
+    ${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');
 }
 
 export const contractorRoutes = [

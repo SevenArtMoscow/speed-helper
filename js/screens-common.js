@@ -2,7 +2,7 @@
 import { api, track, getSession, tg } from './api.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
 import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel, shortTime, dayLabel } from './util.js';
-import { ICON } from './ui.js';
+import { ICON, reviewCard, bindReviews } from './ui.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
 export const shiftName = (s) => `${s.title} · ${dateLabel(s.date)}`;
@@ -328,6 +328,19 @@ export async function finishShift(sid, after) {
   await api.completeShift(sid); track('shift_completed', { id: sid }); toast('Смена завершена', 'ok'); go('#/review/' + sid); if (after) after();
 }
 
+// ---------- все отзывы о человеке ----------
+async function reviewsPage(ctx, role, uid) {
+  uid = Number(uid);
+  const first = await api.userReviews(uid, role, 0); let items = first.items.slice();
+  const draw = () => {
+    ctx.main.innerHTML = `${pageHead('Отзывы')}<div class="card row">${avatar(first.avatar, first.name)}<div class="grow"><b>${esc(first.name)}</b><div class="sm">${stars(first.rating, first.total)}</div></div><a class="g sm" href="#" data-act="toprof">Профиль ›</a></div>
+      ${items.length ? items.map(reviewCard).join('') : emptyState('Отзывов пока нет')}${items.length < first.total ? '<button class="btn block" data-act="morerev">Показать ещё</button>' : ''}`;
+  };
+  draw(); bindReviews(ctx);
+  ctx.acts.toprof = () => go(role === 'contractor' ? '#/w/contractor/' + uid : '#/c/worker/' + uid);
+  ctx.acts.morerev = async () => { const r = await api.userReviews(uid, role, items.length); items = items.concat(r.items); draw(); };
+}
+
 // ---------- отзывы ----------
 async function review(ctx, sid) {
   sid = Number(sid);
@@ -355,5 +368,5 @@ async function review(ctx, sid) {
 
 export const commonRoutes = [
   [/^#\/consent$/, consent], [/^#\/welcome$/, welcome], [/^#\/w\/onboard$/, workerForm], [/^#\/w\/edit$/, workerForm], [/^#\/c\/onboard$/, contractorForm], [/^#\/c\/edit-profile$/, contractorForm],
-  [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/review\/(\d+)$/, review],
+  [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/review\/(\d+)$/, review], [/^#\/reviews\/(worker|contractor)\/(\d+)$/, reviewsPage],
 ];
