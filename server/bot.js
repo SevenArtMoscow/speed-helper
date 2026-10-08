@@ -78,10 +78,10 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
   async function notifyLoop() {
     for (;;) {
       try {
-        const { rows } = await pool.query(`select n.id, n.text, n.link, u.tg_id, u.blocked from notifications n join users u on u.id = n.user_id
+        const { rows } = await pool.query(`select n.id, n.text, n.link, u.tg_id, u.blocked, u.is_fake from notifications n join users u on u.id = n.user_id
           where not n.tg_sent and n.created_at > now() - interval '1 day' order by n.id limit 50`);
         for (const n of rows) {
-          if (!n.blocked) {
+          if (!n.blocked && !n.is_fake) { // тестовым (выдуманным) пользователям сообщения не отправляются
             try {
               await tg('sendMessage', { chat_id: n.tg_id, text: n.text, reply_markup: openBtn('Открыть SPEED HELPER', n.link || '') });
             } catch (e) {

@@ -378,6 +378,26 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('NEW: W3 уведомлён, что отложенная смена недоступна', W3.call('notifications'), (b) => b.some((n) => n.type === 'saved_gone' && /Прошедшая неоконченная/.test(n.text)));
   await ok('NEW: закладка снята', W3.call('savedShifts'), (b) => !b.some((x) => x.id === SX.id));
 
+  // ===== тестовые (выдуманные) пользователи =====
+  const FW = await login(-5001, 'Тест Исполнитель'), FC = await login(-5002, 'Тест Подрядчик');
+  await db.query('update users set is_fake = true where tg_id in (-5001, -5002)');
+  await ok('FAKE: профиль исполнителя', FW.call('saveWorker', { ...wp, name: 'Тест Исполнитель' }));
+  await ok('FAKE: профиль подрядчика', FC.call('saveContractor', { ...cp, name: 'Тест Подрядчик', phone: '0000000001' }));
+  const FS = await ok('FAKE: смена тестового подрядчика', FC.call('createShift', { ...sp, title: 'Тестовая смена симулятора', date: day(9), people: 1 }, key()));
+  const fap = await ok('FAKE: отклик тестового исполнителя', FW.call('apply', FS.id));
+  await ok('FAKE: принят', FC.call('decide', fap.id, 'accepted'));
+  await ok('FAKE: сообщение в личном чате', FW.call('sendMessage', 'dm:' + fap.id, 'Здравствуйте', key()));
+  await ok('FAKE: завершение', FC.call('completeShift', FS.id));
+  await ok('FAKE: в рейтинге обычному пользователю тестовых нет', W1.call('leaderboard', 'all'), (b) => !b.top.some((x) => x.name === 'Тест Исполнитель'));
+  await ok('FAKE: администратору в рейтинге тестовые видны', A.call('leaderboard', 'all'), (b) => b.top.some((x) => x.name === 'Тест Исполнитель'));
+  await ok('FAKE: показатели админки — тестовые отдельно', A.call('adminStats'), (b) => b.fake_users === 2 && b.fake_applications === 1);
+  await ok('FAKE: в списке админа тестовые в конце и с пометкой', A.call('adminUsers'), (b) => b.slice(-2).every((u) => u.is_fake === true) && !b.slice(0, 3).some((u) => u.is_fake));
+  await db.query('select fake_cleanup()');
+  await ok('FAKE: после очистки тестовых нет', A.call('adminStats'), (b) => b.fake_users === 0 && b.fake_applications === 0);
+  await no('FAKE: тестовая смена удалена', W1.call('getShift', FS.id), 'not_found');
+  await ok('FAKE: настоящие данные на месте (смена S1, отклики, рейтинг)', W1.call('getShift', S1.id), (b) => b.title === sp.title);
+  await ok('FAKE: настоящий W3 цел и работает', W3.call('myApplications'), (b) => Array.isArray(b) && b.length >= 1);
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });

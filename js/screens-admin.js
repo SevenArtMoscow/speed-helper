@@ -12,11 +12,12 @@ async function admin(ctx, tab = 'stats') {
   if (tab === 'stats') {
     const s = await api.adminStats();
     const items = [['Пользователи', s.users], ['Исполнители', s.workers], ['Подрядчики', s.contractors], ['Смены', s.shifts], ['Открытые смены', s.open_shifts], ['Отклики', s.applications], ['Принято', s.accepted], ['Завершено смен', s.completed_shifts], ['Активны за 24ч', s.active_24h], ['Новые жалобы', s.reports_new], ['Ошибки за 24ч', s.errors_24h]];
-    body = `<div class="grid2">${items.map(([t, n]) => `<div class="stat"><b>${n}</b>${t}</div>`).join('')}</div>`;
+    if (s.fake_users) items.push(['Тестовые пользователи', s.fake_users], ['Тестовые открытые смены', s.fake_open_shifts], ['Тестовые отклики', s.fake_applications]);
+    body = `<div class="grid2">${items.map(([t, n]) => `<div class="stat"><b>${n}</b>${t}</div>`).join('')}</div>${s.fake_users ? '<p class="mut sm">Цифры выше — только настоящие люди; тестовые (симулятор) считаются отдельно.</p>' : ''}`;
   }
   if (tab === 'users') {
     const l = await api.adminUsers();
-    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
+    body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}${u.is_fake ? ' <span class="tag">тест</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
       <div class="row gap">${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
   }
   if (tab === 'shifts') {
