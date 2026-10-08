@@ -14,6 +14,8 @@ import { loadEnv } from './env.js';
 import { migrate } from './migrate.js';
 import { startBot } from './bot.js';
 import os from 'node:os';
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first'); // у сервера нерабочий IPv6-маршрут до Telegram: без этого бот периодически теряет связь («fetch failed»)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 loadEnv(path.join(ROOT, 'server', '.env'));
