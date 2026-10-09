@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-const log = []; let updates = [], failAnim = false;
+import os from 'node:os';
+import path from 'node:path';
+const log = []; let updates = [], failAnim = false, dropOnce = false;
 const mock = http.createServer((req, res) => {
   const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
     const body = Buffer.concat(chunks); const method = req.url.split('/').pop(); const ct = req.headers['content-type'] || '';
@@ -11,6 +13,7 @@ const mock = http.createServer((req, res) => {
     if (method === 'sendAnimation') {
       const multipart = ct.startsWith('multipart/form-data');
       log.push({ method, multipart, bytes: body.length, json: multipart ? null : JSON.parse(body.toString()) });
+      if (dropOnce && multipart) { dropOnce = false; return req.socket.destroy(); }   // обрыв сети посреди загрузки
       if (failAnim) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, description: 'Bad Request: wrong file' })); }
       return reply({ ok: true, result: { message_id: 1, animation: { file_id: 'FILE_ID_123' } } });
     }
@@ -20,6 +23,7 @@ const mock = http.createServer((req, res) => {
 }).listen(3299, '127.0.0.1');
 
 process.env.TG_API = 'http://127.0.0.1:3299';
+process.env.WELCOME_ID_FILE = path.join(os.tmpdir(), 'sh-test-welcome-id-' + process.pid);
 const { startBot } = await import('../bot.js');
 const pool = { query: async () => ({ rows: [] }) };
 startBot({ pool, token: 'TEST:TOKEN', appUrl: 'https://example.test', admins: [] });
@@ -39,5 +43,12 @@ test('бот: приветствие с анимацией', { timeout: 30000 },
   check('сбой анимации → обычное сообщение, а не тишина', log.at(-1).method === 'sendMessage' && log.at(-1).text.startsWith('Привет, Тест'));
   failAnim = false; updates = [msg(4)]; await wait(900);
   check('после сбоя: файл загружается заново (кэш сброшен)', log.at(-1).method === 'sendAnimation' && log.at(-1).multipart);
+  // сеть до Telegram оборвалась на загрузке: должна быть повторная попытка, а не обычное сообщение вместо гифки
+  failAnim = true; updates = [msg(5)]; await wait(900); failAnim = false;
+  const before = log.length; dropOnce = true; updates = [msg(6)]; await wait(3000);
+  const after = log.slice(before);
+  check('обрыв сети на загрузке → повтор, гифка всё равно доходит', after.filter((x) => x.method === 'sendAnimation' && x.multipart).length === 2 && !after.some((x) => x.method === 'sendMessage'));
+  updates = [msg(7)]; await wait(900);
+  check('после повтора файл запомнен (дальше по file_id)', log.at(-1).method === 'sendAnimation' && !log.at(-1).multipart);
   assert.ok(!results.some((r) => r.startsWith('✗')), results.join(String.fromCharCode(10)));
 });

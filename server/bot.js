@@ -24,23 +24,40 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
   const openBtn = (text, link = '') => ({ inline_keyboard: [[{ text, web_app: { url: appUrl + (link ? '/?r=' + encodeURIComponent(link.replace(/^#/, '')) : '') } }]] });
 
   // Приветствие с анимацией: первый раз файл загружается в Telegram, дальше отправляется по file_id (мгновенно).
-  // Если анимацию отправить не удалось — обычное сообщение, как раньше.
+  // file_id запоминается на диске, чтобы не загружать файл заново после каждого перезапуска сервиса.
+  // У сервера бывают сетевые сбои до Telegram: загрузка повторяется, а запомненный file_id сбрасывается только
+  // если Telegram сказал, что он не подходит (а не при обрыве сети). Если совсем не вышло — обычное сообщение.
+  const ID_FILE = process.env.WELCOME_ID_FILE || path.join(path.dirname(WELCOME), '..', 'server', '.welcome-file-id');
+  const fileSize = () => { try { return fs.statSync(WELCOME).size; } catch { return 0; } };
   let animId = null;
+  try { const o = JSON.parse(fs.readFileSync(ID_FILE, 'utf8')); if (o.id && o.size === fileSize()) animId = o.id; } catch { /* ещё не загружали */ }
+  const rememberId = (id) => { animId = id; try { id ? fs.writeFileSync(ID_FILE, JSON.stringify({ id, size: fileSize() })) : fs.rmSync(ID_FILE, { force: true }); } catch { /* только в памяти */ } };
+  async function uploadWelcome(chatId, caption, markup) {
+    for (let i = 1; ; i++) {
+      try {
+        const fd = new FormData();
+        fd.append('chat_id', String(chatId)); fd.append('caption', caption); fd.append('reply_markup', JSON.stringify(markup));
+        fd.append('width', '1280'); fd.append('height', '720'); fd.append('duration', '6');
+        fd.append('animation', new Blob([fs.readFileSync(WELCOME)], { type: 'video/mp4' }), 'welcome.mp4');
+        const res = await fetch(`${API}/bot${token}/sendAnimation`, { method: 'POST', body: fd, signal: AbortSignal.timeout(30000) });
+        const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
+        if (!j.ok) throw Object.assign(new Error(j.description), { status: res.status });
+        rememberId((j.result.animation || j.result.document || {}).file_id || null);
+        return j.result;
+      } catch (e) { if (e.status || i >= 3) throw e; await sleep(700 * 2 ** (i - 1)); }  // обрыв сети — ещё попытка
+    }
+  }
   async function sendWelcome(chatId, caption, markup) {
     try {
-      if (animId) return await tg('sendAnimation', { chat_id: chatId, animation: animId, caption, reply_markup: markup, width: 1280, height: 720, duration: 6 });
+      if (animId) {
+        try { return await tg('sendAnimation', { chat_id: chatId, animation: animId, caption, reply_markup: markup, width: 1280, height: 720, duration: 6 }); }
+        catch (e) { if (!e.status) throw e; rememberId(null); }   // Telegram не принял file_id — загрузим файл заново
+      }
       if (!fs.existsSync(WELCOME)) throw new Error('нет файла ' + WELCOME);
-      const fd = new FormData();
-      fd.append('chat_id', String(chatId)); fd.append('caption', caption); fd.append('reply_markup', JSON.stringify(markup));
-      fd.append('width', '1280'); fd.append('height', '720'); fd.append('duration', '6');
-      fd.append('animation', new Blob([fs.readFileSync(WELCOME)], { type: 'video/mp4' }), 'welcome.mp4');
-      const res = await fetch(`${API}/bot${token}/sendAnimation`, { method: 'POST', body: fd });
-      const j = await res.json().catch(() => ({ ok: false, description: 'bad json' }));
-      if (!j.ok) throw new Error(j.description);
-      animId = (j.result.animation || j.result.document || {}).file_id || null;
-      return j.result;
+      return await uploadWelcome(chatId, caption, markup);
     } catch (e) {
-      console.error('welcome animation failed:', e.message); animId = null; // кэшированный file_id мог устареть — в следующий раз загрузим заново
+      console.error('welcome animation failed:', e.message, e.cause ? '(' + (e.cause.code || e.cause.message) + ')' : '');
+      if (e.status) rememberId(null);                              // отказ Telegram — кэш недействителен; обрыв сети кэш не трогает
       return tg('sendMessage', { chat_id: chatId, text: caption, reply_markup: markup });
     }
   }
