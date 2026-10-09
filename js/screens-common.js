@@ -157,7 +157,7 @@ const NBODY = (n) => {
 };
 const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message']], ['shifts', 'Смены', ['pro', 'shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
 async function notifications(ctx) {
-  const list = await api.notifications(); let f = 'all';
+  const list = await api.notifications(S.role); let f = 'all';
   const draw = () => {
     const g = NGROUP.find((x) => x[0] === f), l = g[2] ? list.filter((n) => g[2].includes(n.type)) : list;
     const chips = NGROUP.map(([k, t, types]) => { const c = (types ? list.filter((n) => types.includes(n.type)) : list); const u = c.filter((n) => !n.read).length; return `<span class="chip ${f === k ? 'on' : ''}" data-act="nf" data-f="${k}">${t}${u ? ` · <b>${u}</b>` : ''}</span>`; }).join('');
@@ -172,7 +172,7 @@ async function notifications(ctx) {
   draw();
   ctx.acts.nf = (el) => { f = el.dataset.f; draw(); };
   ctx.acts.open = (el) => el.dataset.l && go(el.dataset.l);
-  api.markRead().then(() => refreshMe()).catch(() => {}); // подсветка «новых» остаётся на экране, значок на колокольчике гаснет
+  api.markRead(null, S.role).then(() => refreshMe()).catch(() => {}); // подсветка «новых» остаётся на экране, значок на колокольчике гаснет
 }
 
 // ---------- список чатов: вкладки «Команды» и «Личные», сверху самые свежие ----------

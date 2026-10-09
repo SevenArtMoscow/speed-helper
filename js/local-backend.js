@@ -24,6 +24,19 @@ const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; t
 const arr = (v) => (Array.isArray(v) ? v : []);
 
 function audit(actor, action, meta) { db.audit.push({ id: id(), actor, action, meta, at: now() }); if (db.audit.length > 2000) db.audit.shift(); }
+// режим, которому адресовано уведомление (null — обоим), как _nrole в базе
+function nrole(n) {
+  if (['new_application', 'member_left', 'shift_overdue'].includes(n.type)) return 'contractor';
+  if (['accepted', 'rejected', 'shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'removed', 'role', 'saved_gone', 'new_shift_from_fav'].includes(n.type)) return 'worker';
+  if (n.type === 'review') return String(n.link || '').startsWith('#/c/') ? 'contractor' : 'worker';
+  if (n.type === 'message') {
+    const l = String(n.link || ''), k = Number(l.slice(7));
+    if (l.startsWith('#/team/')) { const s = db.shifts.find((x) => x.id === k); return s && s.contractor_id === n.user_id ? 'contractor' : 'worker'; }
+    if (l.startsWith('#/chat/')) { const a = db.applications.find((x) => x.id === k); return a && a.worker_id === n.user_id ? 'worker' : 'contractor'; }
+  }
+  return null;
+}
+const forRole = (n, role) => !role || !nrole(n) || nrole(n) === role;
 function notify(userId, type, text, link) { db.notifications.push({ id: id(), user_id: userId, type, text, link: link || null, read: false, at: now() }); }
 
 export const profilePercent = (w) => {
@@ -101,7 +114,9 @@ const API = {
     const u = actor(me);
     return { id: u.id, tg_id: u.tg_id, first_name: u.first_name, username: u.username, roles: u.roles, is_admin: u.is_admin,
       worker: workerView(u.id, true), contractor: db.contractors[u.id] ? { ...db.contractors[u.id], ...contractorView(u.id) } : null,
-      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length, terms_accepted: true };
+      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length,
+      unread_worker: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'worker') === 'worker').length,
+      unread_contractor: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'contractor') === 'contractor').length, terms_accepted: true };
   },
   acceptTerms() { return true; },
   deleteAccount() { fail('invalid', 'В локальном режиме разработки удаление недоступно — используйте «Стереть все локальные данные»'); },
@@ -430,8 +445,8 @@ const API = {
   },
 
   // ----- уведомления, жалобы, аналитика -----
-  notifications(me) { actor(me); return db.notifications.filter((n) => n.user_id === me).sort((a, b) => b.at - a.at).slice(0, 100); },
-  markRead(me) { db.notifications.filter((n) => n.user_id === me).forEach((n) => (n.read = true)); return true; },
+  notifications(me, role) { actor(me); return db.notifications.filter((n) => n.user_id === me && forRole(n, role)).sort((a, b) => b.at - a.at).slice(0, 100).map((n) => ({ ...n, role: nrole(n) })); },
+  markRead(me, link, role) { db.notifications.filter((n) => n.user_id === me && (!link || n.link === link) && forRole(n, role)).forEach((n) => (n.read = true)); return true; },
   report(me, { target_type, target_id, reason }) {
     actor(me);
     if (!['worker', 'contractor', 'shift', 'message'].includes(target_type)) fail('invalid');

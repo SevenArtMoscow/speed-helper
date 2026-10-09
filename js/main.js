@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
-import { S, logo, go, back, toast, errMsg, skeleton, setBell, ICON, haptic } from './ui.js';
+import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, ICON, haptic } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
@@ -66,7 +66,7 @@ export function renderTabs(hash) {
   const tb = $('#topbtn'); if (tb) tb.hidden = S.role !== 'worker';
   if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
   t.hidden = false;
-  const unread = S.user ? S.user.unread : 0;
+  const unread = unreadOf(S.user, S.role);
   t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
 }
 
@@ -111,7 +111,7 @@ async function route() {
 
 async function tick() {
   if (document.hidden || !S.user) return;
-  try { const u = await api.me(); if (u.unread !== S.user.unread) { S.user = u; setBell(); } else S.user = u; if (ctx.poll) await ctx.poll(); } catch {}
+  try { const u = await api.me(); if (unreadOf(u, S.role) !== unreadOf(S.user, S.role)) { S.user = u; setBell(); } else S.user = u; if (ctx.poll) await ctx.poll(); } catch {}
 }
 
 async function boot() {

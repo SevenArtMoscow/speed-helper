@@ -444,6 +444,26 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('PRO: админ снимает подписку', A.call('adminRevokePro', W2.id)); await ok('PRO: после снятия не PRO', W2.call('me'), (b) => b.pro === false);
   await ok('PRO: после поднятия лимит не сбрасывается снятием', C.call('mySubscription'), (b) => b.boosts_used === 3);
 
+  // один аккаунт — и исполнитель, и подрядчик: уведомления и счётчики не должны перемешиваться
+  const DR = await login(6201, 'Двойной');
+  await ok('ROLES: профиль исполнителя', DR.call('saveWorker', { ...wp, name: 'Двойной Иван' })); await ok('ROLES: профиль подрядчика', DR.call('saveContractor', { ...cp, name: 'Двойной Иван' }));
+  const RS = await ok('ROLES: смена от лица подрядчика', DR.call('createShift', { ...sp, title: 'Смена двойного', date: day(12), people: 2 }, key()));
+  const RS2 = await ok('ROLES: чужая смена', C2.call('createShift', { ...sp, title: 'Чужая для двойного', date: day(12), people: 2 }, key()));
+  await ok('ROLES: W1 откликается на смену двойного', W1.call('apply', RS.id));      // уведомление подрядчику
+  const rap = await ok('ROLES: двойной откликается как исполнитель', DR.call('apply', RS2.id));
+  await ok('ROLES: C2 принимает двойного', C2.call('decide', rap.id, 'accepted'));   // уведомление исполнителю
+  await ok('ROLES: в режиме подрядчика — только отклик', DR.call('notifications', 'contractor'), (b) => b.some((n) => n.type === 'new_application') && !b.some((n) => n.type === 'accepted'));
+  await ok('ROLES: в режиме исполнителя — только «приняли»', DR.call('notifications', 'worker'), (b) => b.some((n) => n.type === 'accepted') && !b.some((n) => n.type === 'new_application'));
+  await ok('ROLES: без роли видно всё (как раньше)', DR.call('notifications'), (b) => b.some((n) => n.type === 'accepted') && b.some((n) => n.type === 'new_application'));
+  await ok('ROLES: счётчики раздельные', DR.call('me'), (b) => b.unread === 2 && b.unread_worker === 1 && b.unread_contractor === 1);
+  await ok('ROLES: прочитано в режиме исполнителя', DR.call('markRead', null, 'worker'));
+  await ok('ROLES: подрядческое осталось непрочитанным', DR.call('me'), (b) => b.unread_worker === 0 && b.unread_contractor === 1 && b.unread === 1);
+  await ok('ROLES: прочитано в режиме подрядчика', DR.call('markRead', null, 'contractor')); await ok('ROLES: всё прочитано', DR.call('me'), (b) => b.unread === 0);
+  await ok('ROLES: чат — командное сообщение подрядчику-владельцу попадает в его режим', C2.call('sendMessage', 'dm:' + rap.id, 'Привет, вы приняты', key()));
+  await ok('ROLES: сообщение пришло исполнителю, а не подрядчику', DR.call('me'), (b) => b.unread_worker === 1 && b.unread_contractor === 0);
+  await ok('ROLES: общее уведомление (PRO) видно в обоих режимах', A.call('adminGrantPro', DR.id, 3), () => true);
+  await ok('ROLES: PRO в режиме исполнителя', DR.call('notifications', 'worker'), (b) => b.some((n) => n.type === 'pro')); await ok('ROLES: PRO в режиме подрядчика', DR.call('notifications', 'contractor'), (b) => b.some((n) => n.type === 'pro'));
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });

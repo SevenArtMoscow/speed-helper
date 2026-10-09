@@ -202,6 +202,8 @@ export function mountStars(root, initial = 0) {
   return () => v;
 }
 
-export function setBell() { const b = $('#bell'); if (!b) return; const n = S.user ? S.user.unread : 0; b.hidden = !n; b.textContent = n > 9 ? '9+' : n; }
+// непрочитанные именно в текущем режиме (у аккаунта может быть и исполнитель, и подрядчик)
+export const unreadOf = (u, role) => (u ? (role === 'contractor' ? u.unread_contractor : role === 'worker' ? u.unread_worker : u.unread) ?? u.unread : 0);
+export function setBell() { const b = $('#bell'); if (!b) return; const n = unreadOf(S.user, S.role); b.hidden = !n; b.textContent = n > 9 ? '9+' : n; }
 export async function refreshMe() { S.user = await api.me(); setBell(); return S.user; }
-export const setRole = (r) => { S.role = r; localStorage.setItem('sh_role_' + S.user.id, r); };
+export const setRole = (r) => { S.role = r; localStorage.setItem('sh_role_' + S.user.id, r); setBell(); };
