@@ -1,5 +1,6 @@
 // Админ-панель владельцев (доступ только при users.is_admin = true; проверяется и на сервере)
 import { api } from './api.js';
+import { CONFIG } from './config.js';
 import { S, go, toast, errMsg, confirmBox, sheet, pageHead, statusTag, validate } from './ui.js';
 import { esc, dateLabel, timeAgo, payLabel } from './util.js';
 
@@ -18,7 +19,7 @@ async function admin(ctx, tab = 'stats') {
   if (tab === 'users') {
     const l = await api.adminUsers();
     body = l.map((u) => `<div class="card"><div class="row sp"><div><b>${esc(u.name)}</b> ${u.blocked ? '<span class="tag r">заблокирован</span>' : ''}${u.verified ? ' <span class="tag g">✓ проверен</span>' : ''}${u.is_admin ? '<span class="tag y">админ</span>' : ''}${u.is_fake ? ' <span class="tag">тест</span>' : ''}${u.pro ? ' <span class="tag y">PRO</span>' : ''}<div class="mut sm">tg ${u.tg_id} · ${u.roles.join(', ') || 'без роли'}</div></div>
-      <div class="row gap wrap"><button class="btn sm ${u.pro ? '' : 'pri'}" data-act="${u.pro ? 'unpro' : 'pro'}" data-id="${u.id}">${u.pro ? 'Снять PRO' : 'PRO 30 дн.'}</button>${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
+      <div class="row gap wrap">${CONFIG.PRO_ENABLED ? `<button class="btn sm ${u.pro ? '' : 'pri'}" data-act="${u.pro ? 'unpro' : 'pro'}" data-id="${u.id}">${u.pro ? 'Снять PRO' : 'PRO 30 дн.'}</button>` : ''}${u.roles.includes('contractor') ? `<button class="btn sm ${u.verified ? '' : 'pri'}" data-act="ver" data-id="${u.id}" data-v="${u.verified ? 0 : 1}">${u.verified ? 'Снять «Проверенный»' : '✓ Проверенный'}</button>` : ''}${u.is_admin ? '' : `<button class="btn sm ${u.blocked ? '' : 'danger'}" data-act="block" data-id="${u.id}" data-b="${u.blocked ? 0 : 1}">${u.blocked ? 'Разблок.' : 'Блок'}</button>`}</div></div></div>`).join('') || '<p class="mut">Пусто</p>';
   }
   if (tab === 'shifts') {
     const l = await api.adminShifts();

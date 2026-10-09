@@ -1,5 +1,6 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession, tg } from './api.js';
+import { CONFIG } from './config.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
 import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel, shortTime, dayLabel } from './util.js';
 import { ICON, reviewCard, bindReviews } from './ui.js';
@@ -336,6 +337,7 @@ const PERKS = {
     ['shifts', 'Повтор смены в один клик и шаблоны', 'Публикация за 10 секунд', 0], ['mine', 'Аналитика откликов', 'Просмотры, отклики, принятые', 0], ['chats', 'Приоритетная поддержка', 'Отвечаем в первую очередь', 0]],
 };
 async function proPage(ctx) {
+  if (!CONFIG.PRO_ENABLED) { go('#/'); return; }
   const sub = await api.mySubscription(); let who = S.role === 'contractor' ? 'c' : 'w';
   const draw = () => {
     const until = sub.expires_at ? new Date(sub.expires_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';

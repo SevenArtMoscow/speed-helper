@@ -1,6 +1,7 @@
 // UI-компоненты, общее состояние
 import { esc, initials, $, fmtPhone } from './util.js';
 import { api, tg } from './api.js';
+import { CONFIG } from './config.js';
 
 export const S = { user: null, role: null, cats: [], route: '', cfg: {} };
 
@@ -67,8 +68,9 @@ export const ICON = {
 // ---------- карточки профиля ----------
 // Шапка: аватар в кольце, имя, теги, плитки статистики [[значение, подпись], …]
 // rev = [роль, id, число отзывов]: первая плитка (оценка) становится кнопкой «Все отзывы»
-export const proBadge = () => `<span class="pro-b">${ICON.crown}PRO</span>`;
+export const proBadge = () => (CONFIG.PRO_ENABLED ? `<span class="pro-b">${ICON.crown}PRO</span>` : '');
 export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null, pro = false }) {
+  pro = pro && CONFIG.PRO_ENABLED;
   return `<div class="hero2"><div class="avring ${pro ? 'pro' : verified ? 'ok' : ''}">${avatar(av, name, 'xl')}</div><h1>${esc(name)}</h1>${sub ? `<div class="mut sm">${sub}</div>` : ''}
     ${pro || tags ? `<div class="row wrap gap ctr" style="margin-top:10px">${pro ? proBadge() : ''}${tags}</div>` : ''}
     ${stats.length ? `<div class="stats3">${stats.map(([v, l], i) => (i === 0 && rev && rev[2] > 0 ? `<button class="st click" data-act="allrev" data-role="${rev[0]}" data-id="${rev[1]}" aria-label="Все отзывы"><b>${v}</b><span>${l} ›</span></button>` : `<div class="st"><b>${v}</b><span>${l}</span></div>`)).join('')}</div>` : ''}</div>`;
@@ -176,6 +178,7 @@ export const STATUS = {
 // ---------- отзывы: видно, кто оставил; нажатие ведёт в профиль автора ----------
 // карточка подписки на профиле
 export function proCard(u) {
+  if (!CONFIG.PRO_ENABLED) return '';
   const until = u.pro_until ? new Date(u.pro_until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : '';
   return `<div class="procard ${u.pro ? 'on' : ''}" data-act="topro"><span class="pc-ic">${ICON.crown}</span><div class="grow"><b>${u.pro ? 'SPEED HELPER PRO' : 'Подключить PRO'}</b><div class="sm">${u.pro ? 'Активна до ' + until : 'Значок, приоритет и поднятие в топ · 990 ₽/мес'}</div></div><span class="pc-go">›</span></div>`;
 }
