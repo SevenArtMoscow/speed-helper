@@ -17,7 +17,7 @@ const mock = http.createServer((req, res) => {
       if (failAnim) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, description: 'Bad Request: wrong file' })); }
       return reply({ ok: true, result: { message_id: 1, animation: { file_id: 'FILE_ID_123' } } });
     }
-    if (method === 'sendMessage') { log.push({ method, text: JSON.parse(body.toString()).text.slice(0, 30) }); return reply({ ok: true, result: {} }); }
+    if (method === 'sendMessage') { const b = JSON.parse(body.toString()); log.push({ method, text: b.text.slice(0, 30), full: b.text, markup: b.reply_markup }); return reply({ ok: true, result: {} }); }
     reply({ ok: true, result: true });
   });
 }).listen(3299, '127.0.0.1');
@@ -25,9 +25,11 @@ const mock = http.createServer((req, res) => {
 process.env.TG_API = 'http://127.0.0.1:3299';
 process.env.WELCOME_ID_FILE = path.join(os.tmpdir(), 'sh-test-welcome-id-' + process.pid);
 const { startBot } = await import('../bot.js');
-const pool = { query: async () => ({ rows: [] }) };
+let verifyResult = 'ok'; const poolCalls = [];
+const pool = { query: async (sql, args) => { poolCalls.push({ sql, args }); return { rows: String(sql).includes('bot_verify_phone') ? [{ r: verifyResult }] : [] }; } };
 startBot({ pool, token: 'TEST:TOKEN', appUrl: 'https://example.test', admins: [] });
-const msg = (id) => ({ update_id: id, message: { chat: { id: 5, type: 'private' }, from: { first_name: 'Тест' }, text: '/start' } });
+const msg = (id) => ({ update_id: id, message: { chat: { id: 5, type: 'private' }, from: { id: 5, first_name: 'Тест' }, text: '/start' } });
+const contact = (id, userId) => ({ update_id: id, message: { chat: { id: 5, type: 'private' }, from: { id: 5, first_name: 'Тест' }, contact: { phone_number: '79161234567', user_id: userId } } });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const check = (name, ok) => results.push((ok ? '✓ ' : '✗ ') + name);
@@ -50,5 +52,18 @@ test('бот: приветствие с анимацией', { timeout: 30000 },
   check('обрыв сети на загрузке → повтор, гифка всё равно доходит', after.filter((x) => x.method === 'sendAnimation' && x.multipart).length === 2 && !after.some((x) => x.method === 'sendMessage'));
   updates = [msg(7)]; await wait(900);
   check('после повтора файл запомнен (дальше по file_id)', log.at(-1).method === 'sendAnimation' && !log.at(-1).multipart);
+  // подтверждение номера подрядчика
+  updates = [{ update_id: 20, message: { chat: { id: 5, type: 'private' }, from: { id: 5, first_name: 'Тест' }, text: '/start verify' } }]; await wait(900);
+  check('/start verify: просит поделиться номером (кнопка request_contact)', log.at(-1).method === 'sendMessage' && JSON.stringify(log.at(-1).markup).includes('request_contact'));
+  const calls0 = poolCalls.length; updates = [contact(21, 777)]; await wait(900);
+  check('чужой контакт отклонён и в базу не попадает', poolCalls.length === calls0 && log.at(-1).full.includes('именно ваш номер'));
+  verifyResult = 'ok'; updates = [contact(22, 5)]; await wait(900);
+  const vc = poolCalls.filter((c) => String(c.sql).includes('bot_verify_phone')).at(-1);
+  check('свой контакт: номер уходит в базу вместе с id отправителя', vc && vc.args[0] === 5 && vc.args[1] === '79161234567');
+  check('свой контакт: бот подтверждает и зовёт назад в приложение', log.some((x) => x.method === 'sendMessage' && (x.full || '').includes('Номер подтверждён')) && log.at(-1).full.includes('Вернитесь в приложение'));
+  verifyResult = 'taken'; updates = [contact(23, 5)]; await wait(900);
+  check('номер уже у другого аккаунта: понятное сообщение', log.at(-1).full.includes('другому аккаунту'));
+  verifyResult = 'foreign'; updates = [contact(24, 5)]; await wait(900);
+  check('не российский номер: понятное сообщение', log.at(-1).full.includes('российские'));
   assert.ok(!results.some((r) => r.startsWith('✗')), results.join(String.fromCharCode(10)));
 });

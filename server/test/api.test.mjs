@@ -17,9 +17,11 @@ const ROOT = `http://127.0.0.1:${PORT}`, BASE = ROOT + '/api';
 for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
 
 const initData = (user) => { const p = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify(user) }); const c = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n'); p.set('hash', crypto.createHmac('sha256', crypto.createHmac('sha256', 'WebAppData').update(TOKEN).digest()).update(c).digest('hex')); return p.toString(); };
-async function login(id, name) {
+async function login(id, name, unverified = false) {
   const r = await (await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id, first_name: name }) }) })).json();
   const call = async (fn, ...args) => { const res = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + r.access_token }, body: JSON.stringify({ fn, args }) }); const j = await res.json().catch(() => ({})); return { status: res.status, body: j }; };
+  // по умолчанию тестовые пользователи с подтверждённым номером (уникальным), иначе подрядчики не смогли бы публиковать смены
+  if (!unverified) await db.query('update users set phone_verified = $2 where id = $1 and phone_verified is null', [r.user_id, String(9000000000 + id)]);
   return { id: r.user_id, call };
 }
 let pass = 0, fail = 0; const bugs = [];
@@ -463,6 +465,25 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('ROLES: сообщение пришло исполнителю, а не подрядчику', DR.call('me'), (b) => b.unread_worker === 1 && b.unread_contractor === 0);
   await ok('ROLES: общее уведомление (PRO) видно в обоих режимах', A.call('adminGrantPro', DR.id, 3), () => true);
   await ok('ROLES: PRO в режиме исполнителя', DR.call('notifications', 'worker'), (b) => b.some((n) => n.type === 'pro')); await ok('ROLES: PRO в режиме подрядчика', DR.call('notifications', 'contractor'), (b) => b.some((n) => n.type === 'pro'));
+
+  // подтверждение номера: без него смену не создать; один номер — один аккаунт; удаление аккаунта освобождает номер
+  const verify = async (tgId, phone) => (await db.query('select bot_verify_phone($1, $2) as r', [tgId, phone])).rows[0].r;
+  const UV = await login(7001, 'Новичок', true), UV2 = await login(7002, 'Двойник', true);
+  await ok('PHONE: профиль подрядчика UV', UV.call('saveContractor', { ...cp, name: 'Новичок' })); await ok('PHONE: профиль подрядчика UV2', UV2.call('saveContractor', { ...cp, name: 'Двойник' }));
+  await ok('PHONE: до подтверждения phone_verified = false', UV.call('me'), (b) => b.phone_verified === false);
+  await no('PHONE: смену без подтверждённого номера создать нельзя', UV.call('createShift', { ...sp, title: 'Без номера', date: day(13) }, key()), 'phone_unverified');
+  check('PHONE: короткий номер отклонён', (await verify(7001, '123')) === 'invalid');
+  check('PHONE: не российский номер отклонён', (await verify(7001, '+49 151 2345 6789')) === 'foreign');
+  check('PHONE: неизвестный пользователь', (await verify(999999, '+7 916 111-22-33')) === 'no_user');
+  check('PHONE: подтверждение проходит', (await verify(7001, '+7 (916) 111-22-33')) === 'ok');
+  await ok('PHONE: после подтверждения phone_verified = true', UV.call('me'), (b) => b.phone_verified === true);
+  await ok('PHONE: теперь смену создать можно', UV.call('createShift', { ...sp, title: 'С номером', date: day(13) }, key()));
+  check('PHONE: тот же номер на втором аккаунте (с 8 вместо +7) — занят', (await verify(7002, '8 916 111 22 33')) === 'taken');
+  await no('PHONE: у двойника смену создать нельзя', UV2.call('createShift', { ...sp, title: 'Двойник', date: day(13) }, key()), 'phone_unverified');
+  check('PHONE: повторное подтверждение тем же человеком не мешает', (await verify(7001, '79161112233')) === 'ok');
+  await ok('PHONE: админ публикует без проверки номера', A.call('me'), (b) => b.phone_verified === true);
+  await ok('PHONE: удаление аккаунта', UV.call('deleteAccount'));
+  check('PHONE: после удаления номер свободен для другого аккаунта', (await verify(7002, '79161112233')) === 'ok');
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

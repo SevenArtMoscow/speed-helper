@@ -62,16 +62,39 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
     }
   }
 
+  let username = '';
   async function setup() {
     await tg('deleteWebhook', {});
+    username = (await tg('getMe', {})).username || '';
     await tg('setMyCommands', { commands: [{ command: 'start', description: 'Открыть SPEED HELPER' }, { command: 'help', description: 'Как это работает' }, { command: 'privacy', description: 'Политика конфиденциальности' }] });
     if (appUrl) await tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Открыть', web_app: { url: appUrl } } });
     await tg('setMyDescription', { description: 'SPEED HELPER — краткосрочные смены и исполнители. Найди работу на завтра или людей на смену за минуту.' }).catch(() => {});
   }
 
+  // Подтверждение номера: человек сам нажимает «Поделиться номером»; принимаем, только если контакт его собственный.
+  const phoneKeyboard = { keyboard: [[{ text: 'Поделиться номером', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
+  async function onContact(m) {
+    const c = m.contact;
+    if (!c || c.user_id !== m.from.id) {
+      return tg('sendMessage', { chat_id: m.chat.id, text: 'Нужен именно ваш номер. Нажмите кнопку «Поделиться номером» внизу — не пересылайте чужой контакт.', reply_markup: phoneKeyboard });
+    }
+    const { rows } = await pool.query('select bot_verify_phone($1, $2) as r', [m.from.id, c.phone_number]);
+    const r = rows[0] && rows[0].r;
+    const say = (text, markup) => tg('sendMessage', { chat_id: m.chat.id, text, reply_markup: markup || { remove_keyboard: true } });
+    if (r === 'ok') { await say('Номер подтверждён ✅ Теперь можно публиковать смены.'); return tg('sendMessage', { chat_id: m.chat.id, text: 'Вернитесь в приложение — экран обновится сам.', reply_markup: openBtn('Открыть SPEED HELPER') }); }
+    if (r === 'taken') return say('Этот номер уже привязан к другому аккаунту. Один номер — один аккаунт. Если это ваш старый аккаунт, удалите его в приложении (Профиль → Удалить аккаунт) и подтвердите номер снова.');
+    if (r === 'no_user') return say('Сначала откройте приложение и заполните профиль, затем подтвердите номер.', openBtn('Открыть SPEED HELPER'));
+    if (r === 'foreign') return say('Пока принимаем только российские номера (+7).');
+    return say('Не удалось прочитать номер. Попробуйте ещё раз.', phoneKeyboard);
+  }
+
   async function onMessage(m) {
     const text = (m.text || '').trim();
     if (m.chat.type !== 'private') return;
+    if (m.contact) return onContact(m);
+    if (/^\/start\s+verify\b/.test(text)) {
+      return tg('sendMessage', { chat_id: m.chat.id, text: 'Чтобы публиковать смены, подтвердите номер телефона: нажмите кнопку «Поделиться номером» внизу. Это защита от спама и подставных аккаунтов. Номер видим только мы и не показываем его другим пользователям.', reply_markup: phoneKeyboard });
+    }
     if (/^\/(start|app)\b/.test(text)) {
       return sendWelcome(m.chat.id, `Привет, ${m.from.first_name || 'друг'}! 👋\n\nSPEED HELPER — смены на завтра и исполнители за минуту.\n• Исполнителям: свайпайте смены, откликайтесь, получайте подтверждение.\n• Подрядчикам: публикуйте смену и собирайте команду.\n\nУведомления об откликах и сменах будут приходить сюда.`, openBtn('🚀 Открыть SPEED HELPER'));
     }
@@ -126,5 +149,5 @@ export function startBot({ pool, token, appUrl, admins = [] }) {
   poll();
   notifyLoop();
   // оповещение владельцев (сбои, перезапуски); не падает, если кто-то из них не запускал бота
-  return { alert: async (text) => { for (const id of admins) await tg('sendMessage', { chat_id: id, text }).catch(() => {}); } };
+  return { get username() { return username; }, alert: async (text) => { for (const id of admins) await tg('sendMessage', { chat_id: id, text }).catch(() => {}); } };
 }

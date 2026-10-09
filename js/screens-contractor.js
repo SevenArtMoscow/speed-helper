@@ -1,7 +1,7 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
 import { CONFIG } from './config.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, openBot } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, finishShift, shiftName } from './screens-common.js';
@@ -98,9 +98,21 @@ export function parseShiftText(text) {
   return out;
 }
 
+// «ворота»: до подтверждения номера смену не создать (защита от спама и подставных подрядчиков)
+function phoneGate(ctx) {
+  ctx.render(`${pageHead('Новая смена')}<div class="card gate"><div class="gate-ic">${ICON.shield}</div><h2>Подтвердите номер телефона</h2>
+    <p class="mut">Чтобы публиковать смены, нужен подтверждённый номер. Это защита от спама и подставных аккаунтов — исполнители видят, что подрядчик настоящий. Займёт полминуты.</p>
+    <ol class="gate-steps"><li>Нажмите кнопку ниже — откроется чат с ботом</li><li>Нажмите в чате «Поделиться номером» — это номер вашего Telegram</li><li>Вернитесь сюда — экран обновится сам</li></ol>
+    <button class="btn pri block" data-act="verify">Подтвердить в Telegram</button>
+    <p class="mut sm" style="margin-top:10px">Номер используется только для защиты от дублей и спама и другим пользователям не показывается. Один номер — один аккаунт.</p></div>`);
+  ctx.acts.verify = () => openBot('verify');
+  ctx.poll = async () => { if (S.user && S.user.phone_verified) { ctx.poll = null; createOrEdit(ctx); } };
+}
+
 async function createOrEdit(ctx, id) {
   const editing = !!id; id = Number(id);
   if (need()) return go('#/c/onboard');
+  if (!editing && !S.user.phone_verified) return phoneGate(ctx);   // публиковать смены можно только с подтверждённым номером
   const old = editing ? await api.getShift(id) : null;
   if (old && old.contractor_id !== S.user.id) return go('#/c/home');
   const reqs = new Set(old ? old.requirements : []); const custom = (old ? old.requirements : []).filter((r) => !BASE_TAGS.includes(r));
@@ -284,8 +296,9 @@ async function profile(ctx) {
   ctx.render(`${heroCard({ rev: ['contractor', u.id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
+    ${u.phone_verified ? '<div class="okline">✓ Номер подтверждён — можно публиковать смены</div>' : '<button class="btn block" data-act="verify" style="margin-top:10px">Подтвердить номер, чтобы публиковать смены</button>'}
     ${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
-  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');
+  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile'); ctx.acts.verify = () => openBot('verify');
 }
 
 export const contractorRoutes = [

@@ -68,6 +68,13 @@ export const ICON = {
 // ---------- карточки профиля ----------
 // Шапка: аватар в кольце, имя, теги, плитки статистики [[значение, подпись], …]
 // rev = [роль, id, число отзывов]: первая плитка (оценка) становится кнопкой «Все отзывы»
+// открыть чат с ботом (например, подтверждение номера: ?start=verify)
+export function openBot(start) {
+  const name = S.cfg && S.cfg.bot;
+  if (!name) { toast('Бот сейчас недоступен — напишите в поддержку', 'err'); return; }
+  const url = `https://t.me/${name}${start ? '?start=' + start : ''}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank', 'noopener');
+}
 export const proBadge = () => (CONFIG.PRO_ENABLED ? `<span class="pro-b">${ICON.crown}PRO</span>` : '');
 export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null, pro = false }) {
   pro = pro && CONFIG.PRO_ENABLED;

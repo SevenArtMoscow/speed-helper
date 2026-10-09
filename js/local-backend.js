@@ -114,7 +114,7 @@ const API = {
     const u = actor(me);
     return { id: u.id, tg_id: u.tg_id, first_name: u.first_name, username: u.username, roles: u.roles, is_admin: u.is_admin,
       worker: workerView(u.id, true), contractor: db.contractors[u.id] ? { ...db.contractors[u.id], ...contractorView(u.id) } : null,
-      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length,
+      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length, phone_verified: true,
       unread_worker: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'worker') === 'worker').length,
       unread_contractor: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'contractor') === 'contractor').length, terms_accepted: true };
   },

@@ -341,3 +341,9 @@ main.anim>*:nth-child(6){animation-delay:.2s}main.anim>*:nth-child(7){animation-
 .todo{display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.05);border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .todo .pl{margin-left:auto;flex:none;color:var(--g);font-weight:700;font-size:13px}
 .todo:active{transform:scale(.985)}
+
+/* подтверждение номера */
+.gate{text-align:center;padding:24px 18px}
+.gate-ic{width:56px;height:56px;border-radius:18px;margin:0 auto 12px;display:grid;place-items:center;background:rgba(57,255,106,.12);color:var(--g)}.gate-ic svg{width:28px;height:28px}
+.gate h2{margin:0 0 8px}.gate-steps{text-align:left;margin:14px 0 16px;padding-left:20px;color:var(--mut);font-size:14px;line-height:1.6}
+.okline{margin-top:10px;padding:10px 14px;border-radius:14px;background:rgba(57,255,106,.1);color:var(--g);font-size:14px;font-weight:600}
