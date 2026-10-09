@@ -322,7 +322,7 @@ async function contractorPage(ctx, id) {
 
 // ---------- профиль исполнителя ----------
 export function profileBlock(w, own) {
-  const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + w.license.join(', ')]].filter(([, , v]) => v);
+  const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + esc(w.license.join(', '))]].filter(([, , v]) => v);
   const feats = [w.medbook && pill('heart', 'Медкнижка'), w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
   const skills = (w.skills || []).map((s) => `<span class="pill plain">${esc(s)}</span>`);
   return heroCard({ rev: ['worker', w.user_id, w.reviews], pro: w.pro, av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),

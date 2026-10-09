@@ -7,6 +7,8 @@ import { sheet } from './ui.js';
 import { esc, debounce } from './util.js';
 
 const MAPLIBRE = 'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl';
+// контрольные суммы закреплённой версии: если файл на CDN подменят, браузер его не выполнит
+const SRI = { css: 'sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK', js: 'sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp' };
 const STYLE = 'https://tiles.openfreemap.org/styles/dark';
 const DADATA = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs';
 const GREEN = '#39ff6a';
@@ -16,9 +18,9 @@ let loading = null;
 function loadMaplibre() {
   if (window.maplibregl) return Promise.resolve(window.maplibregl);
   if (loading) return loading;
-  const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = MAPLIBRE + '.css'; document.head.appendChild(css);
+  const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = MAPLIBRE + '.css'; css.integrity = SRI.css; css.crossOrigin = 'anonymous'; document.head.appendChild(css);
   loading = new Promise((res, rej) => {
-    const s = document.createElement('script'); s.src = MAPLIBRE + '.js';
+    const s = document.createElement('script'); s.src = MAPLIBRE + '.js'; s.integrity = SRI.js; s.crossOrigin = 'anonymous';
     s.onload = () => res(window.maplibregl);
     s.onerror = () => { loading = null; s.remove(); rej(new Error('Карта не загрузилась. Проверьте интернет')); };
     document.head.appendChild(s);

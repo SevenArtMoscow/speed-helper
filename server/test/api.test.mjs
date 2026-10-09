@@ -22,7 +22,7 @@ async function login(id, name, unverified = false) {
   const call = async (fn, ...args) => { const res = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + r.access_token }, body: JSON.stringify({ fn, args }) }); const j = await res.json().catch(() => ({})); return { status: res.status, body: j }; };
   // по умолчанию тестовые пользователи с подтверждённым номером (уникальным), иначе подрядчики не смогли бы публиковать смены
   if (!unverified) await db.query('update users set phone_verified = $2 where id = $1 and phone_verified is null', [r.user_id, String(9000000000 + id)]);
-  return { id: r.user_id, call };
+  return { id: r.user_id, call, token: r.access_token };
 }
 let pass = 0, fail = 0; const bugs = [];
 const ok = async (name, p, check) => { const r = await p; const good = r.status === 200 && (!check || check(r.body)); good ? pass++ : (fail++, bugs.push(`${name}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)); return r.body; };
@@ -484,6 +484,31 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('PHONE: админ публикует без проверки номера', A.call('me'), (b) => b.phone_verified === true);
   await ok('PHONE: удаление аккаунта', UV.call('deleteAccount'));
   check('PHONE: после удаления номер свободен для другого аккаунта', (await verify(7002, '79161112233')) === 'ok');
+
+  // ---- безопасность: размеры, допустимые значения, скрытые смены ----
+  const SEC = await login(7101, 'Безопасность');
+  await ok('SEC: обычное событие записывается', SEC.call('track', 'sec_test_ok', { a: 1 }));
+  await ok('SEC: слишком большое событие молча игнорируется', SEC.call('track', 'sec_test_big', { x: 'я'.repeat(5000) }));
+  await ok('SEC: слишком длинное имя события игнорируется', SEC.call('track', 'zzzz' + 'z'.repeat(100), {}));
+  const evs = await db.query("select event from events where event like 'sec_test_%' or event like 'zzzz%'");
+  check('SEC: в журнале только нормальное событие', evs.rows.length === 1 && evs.rows[0].event === 'sec_test_ok', JSON.stringify(evs.rows));
+  await ok('SEC: огромная ошибка игнорируется', SEC.call('logError', { message: 'я'.repeat(7000) })); await ok('SEC: обычная ошибка пишется', SEC.call('logError', { message: 'тест' }));
+  const errs = await db.query("select count(*)::int as n from events where event = 'error' and user_id = $1", [SEC.id]);
+  check('SEC: в журнале одна ошибка из двух', errs.rows[0].n === 1, JSON.stringify(errs.rows));
+  const bigReq = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SEC.token }, body: JSON.stringify({ fn: 'track', args: ['sec_big_req', { x: 'a'.repeat(100000) }] }) });
+  check('SEC: запрос больше 64 КБ отклонён (кроме профиля с фото)', bigReq.status === 413, String(bigReq.status));
+  await ok('SEC: профиль с фото по-прежнему принимается', SEC.call('saveWorker', { ...wp, name: 'Безопасный', license: ['B', '<b data-pwn=1>x</b>', 'Z', 'B'], skills: ['я'.repeat(100), 'ok'] }),
+    (b) => JSON.stringify(b.worker.license) === '["B"]' && b.worker.skills[0].length === 60 && b.worker.skills[1] === 'ok');
+  const badPath = await fetch(ROOT + '/%E0%A4%A', {}); check('SEC: некорректный адрес страницы — 400, а не 500', badPath.status === 400, String(badPath.status));
+  const HSH = await ok('SEC: смена для скрытия', C2.call('createShift', { ...sp, title: 'Скрытая смена', date: day(14) }, key()));
+  await ok('SEC: админ скрывает смену', A.call('adminHideShift', HSH.id, true));
+  await no('SEC: скрытая смена посторонним недоступна', W3.call('getShift', HSH.id), 'not_found');
+  await ok('SEC: владельцу скрытая смена доступна', C2.call('getShift', HSH.id)); await ok('SEC: админу скрытая смена доступна', A.call('getShift', HSH.id));
+  await ok('SEC: после возврата видна всем', A.call('adminHideShift', HSH.id, false)); await ok('SEC: видна исполнителю', W3.call('getShift', HSH.id));
+  const RV = await ok('SEC: смена для отзыва', C2.call('createShift', { ...sp, title: 'Для отзыва', date: day(15) }, key()));
+  const rva = await ok('SEC: W3 откликается', W3.call('apply', RV.id)); await ok('SEC: C2 принимает', C2.call('decide', rva.id, 'accepted')); await ok('SEC: C2 завершает', C2.call('completeShift', RV.id));
+  await no('SEC: огромные критерии отзыва отклонены', W3.call('submitReview', { shift_id: RV.id, to_user: C2.id, stars: 5, criteria: { a: 'я'.repeat(700) }, text: 'ок' }), 'invalid');
+  await ok('SEC: обычный отзыв проходит', W3.call('submitReview', { shift_id: RV.id, to_user: C2.id, stars: 5, criteria: { 'Условия': 5 }, text: 'ок' }));
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

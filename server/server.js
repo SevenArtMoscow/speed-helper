@@ -38,7 +38,8 @@ setInterval(() => { const t = Date.now() - 3600e3; for (const [k, a] of hits) if
 // запросы за nginx: реальный адрес приходит в X-Real-IP (порт 3000 наружу закрыт и слушает только 127.0.0.1)
 const clientIp = (req) => String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
 // дополнительные лимиты на «дорогие» и спам-опасные методы: [запросов, окно в мс]
-const FN_LIMITS = { sendMessage: [40, 60e3], createShift: [15, 3600e3], apply: [150, 3600e3], report: [10, 3600e3], saveWorker: [30, 3600e3], saveContractor: [30, 3600e3], logError: [30, 60e3], deleteAccount: [3, 3600e3] };
+const FN_LIMITS = { sendMessage: [40, 60e3], createShift: [15, 3600e3], apply: [150, 3600e3], report: [10, 3600e3], saveWorker: [30, 3600e3], saveContractor: [30, 3600e3], logError: [30, 60e3], track: [120, 60e3], deleteAccount: [3, 3600e3] };
+const BIG_BODY = new Set(['saveWorker', 'saveContractor']);   // только они несут фото (до 400 КБ)
 const RATE_MSG = { message: 'Слишком много действий подряд — подождите минуту и повторите', hint: 'rate' };
 
 // «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера (параметр соединения)
@@ -81,18 +82,18 @@ const CSP = ["default-src 'self'", "script-src 'self' https://telegram.org https
   "font-src 'self' data:", "connect-src 'self' https://tiles.openfreemap.org https://suggestions.dadata.ru", "worker-src 'self' blob:", "child-src blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
   'frame-ancestors https://web.telegram.org https://*.telegram.org https://telegram.org'].join('; ');
 const json = (res, status, o) => { res.writeHead(status, { ...SEC, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
-function readBody(req, limit = 3 * 1024 * 1024) {
+function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Слишком большой запрос'), { status: 413 })); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')); } catch { reject(Object.assign(new Error('Неверный JSON'), { status: 400 })); } });
+    req.on('end', () => { req.bodySize = size; try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')); } catch { reject(Object.assign(new Error('Неверный JSON'), { status: 400 })); } });
     req.on('error', reject);
   });
 }
 
 async function auth(req, res) {
   if (limited('auth:' + clientIp(req), 40, 60e3)) return json(res, 429, RATE_MSG);
-  const { initData } = await readBody(req);
+  const { initData } = await readBody(req, 16 * 1024);
   const user = verifyInitData(String(initData || ''), env.TG_BOT_TOKEN);
   if (!user?.id) return json(res, 401, { error: 'Неверные данные Telegram', code: 'unauthorized' });
   // один Telegram-пользователь = один аккаунт (unique tg_id); владельцы из ADMIN_TG_IDS получают права админа
@@ -109,8 +110,9 @@ async function rpc(req, res) {
   const claims = verifyJwt((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
   if (!claims) return json(res, 401, { message: 'Сессия истекла, откройте приложение заново', hint: 'unauthorized' });
   if (limited('rpc:' + claims.sub, 400, 60e3)) return json(res, 429, RATE_MSG);
-  const { fn, args } = await readBody(req);
+  const { fn, args } = await readBody(req, 1024 * 1024);   // до 1 МБ только ради фото профиля; для остальных методов — до 64 КБ (ниже)
   if (typeof fn !== 'string' || !/^[a-zA-Z]{1,40}$/.test(fn)) return json(res, 400, { message: 'Неизвестный метод', hint: 'invalid' });
+  if (req.bodySize > 64 * 1024 && !BIG_BODY.has(fn)) return json(res, 413, { message: 'Слишком большой запрос', hint: 'invalid' });
   const fl = FN_LIMITS[fn]; if (fl && limited(`fn:${fn}:${claims.sub}`, fl[0], fl[1])) return json(res, 429, RATE_MSG);
   const c = await pool.connect();
   try {
@@ -136,7 +138,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const PUBLIC = /^\/(index\.html|manifest\.json|sw\.js|(css|js|icons|legal)\/[\w.\-]+)$/;
 const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 function serveStatic(req, res) {
-  let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  let p; try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400, SEC); return res.end('Bad request'); }
   if (p === '/') p = '/index.html';
   if (!PUBLIC.test(p)) { p = '/index.html'; }
   const file = path.join(ROOT, p);
