@@ -181,24 +181,32 @@ async function chats(ctx) {
   let tab = sessionStorage.getItem('sh_chtab') || '', teams = [], dms = [];
   const other = S.role === 'contractor' ? ['Исполнитель', 'worker'] : ['Подрядчик', 'owner'];
   const preview = (last, mine) => last ? `<div class="cprev">${last.mine || mine ? '<span class="you">Вы:</span> ' : last.name ? `<span class="you">${esc(String(last.name).split(' ')[0])}:</span> ` : ''}${esc(last.text)}</div>` : '<div class="cprev mut">Сообщений пока нет — напишите первым</div>';
-  const draw = () => {
-    const tUn = teams.filter((x) => x.unread).length, dUn = dms.filter((x) => x.unread).length;
-    const tabs = `<div class="tabsx"><span class="chip ${tab === 'team' ? 'on' : ''}" data-act="ctab" data-t="team">Команды смен · ${teams.length}${tUn ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'dm' ? 'on' : ''}" data-act="ctab" data-t="dm">Личные · ${dms.length}${dUn ? ' <i class="dot"></i>' : ''}</span></div>`;
-    let body;
-    if (tab === 'team') body = teams.length ? teams.map((s) => {
-      const end = s.status === 'completed' ? '<span class="tag o">Завершена</span>' : '';
-      return `<div class="crow click ${s.unread ? 'un' : ''}" data-act="team" data-id="${s.id}"><span class="cav team">${ICON.users}</span><div class="cb"><div class="ctop"><b>${esc(s.title)}</b><span class="ctime">${s.last ? shortTime(s.last.at) : ''}</span></div>
+  const doneShift = (st) => st === 'completed' || st === 'cancelled';   // чаты завершённых смен уходят в архив
+  const teamRow = (s) => {
+    const end = s.status === 'completed' ? '<span class="tag o">Завершена</span>' : '';
+    return `<div class="crow click ${s.unread ? 'un' : ''}" data-act="team" data-id="${s.id}"><span class="cav team">${ICON.users}</span><div class="cb"><div class="ctop"><b>${esc(s.title)}</b><span class="ctime">${s.last ? shortTime(s.last.at) : ''}</span></div>
         ${S.role === 'contractor' ? '' : `<div class="csub">${esc(s.contractor?.company || s.contractor?.name || '')}</div>`}<div class="csub">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${s.accepted_count}/${s.people} чел. ${end}</div>${preview(s.last)}</div>${s.unread ? '<i class="dot"></i>' : ''}</div>`;
-    }).join('') : emptyState('Командных чатов пока нет', S.role === 'contractor' ? 'Чат команды появится, когда вы примете первого исполнителя.' : 'Чат команды появится, когда подрядчик примет ваш отклик.');
-    else body = dms.length ? dms.map((d) => `<div class="crow click ${d.unread ? 'un' : ''}" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="cb"><div class="ctop"><b>${esc(d.info.title)} <span class="rt ${other[1]}">${other[0]}</span></b><span class="ctime">${d.last ? shortTime(d.last.at) : ''}</span></div>
-        <div class="csub">${esc(d.info.shift.title)} · ${esc(dateLabel(d.info.shift.date))} ${statusTag(d.info.application.status)}</div>${preview(d.last ? { text: d.last.text, mine: d.last.user_id === getSession().me, name: d.last.name } : null)}</div>${d.unread ? '<i class="dot"></i>' : ''}</div>`).join('')
-      : emptyState('Личных чатов пока нет', S.role === 'contractor' ? 'Здесь появятся переписки с исполнителями, откликнувшимися на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.');
+  };
+  const dmRow = (d) => `<div class="crow click ${d.unread ? 'un' : ''}" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="cb"><div class="ctop"><b>${esc(d.info.title)} <span class="rt ${other[1]}">${other[0]}</span></b><span class="ctime">${d.last ? shortTime(d.last.at) : ''}</span></div>
+        <div class="csub">${esc(d.info.shift.title)} · ${esc(dateLabel(d.info.shift.date))} ${statusTag(d.info.application.status)}</div>${preview(d.last ? { text: d.last.text, mine: d.last.user_id === getSession().me, name: d.last.name } : null)}</div>${d.unread ? '<i class="dot"></i>' : ''}</div>`;
+  const draw = () => {
+    const tAct = teams.filter((s) => !doneShift(s.status)), tArc = teams.filter((s) => doneShift(s.status));
+    const dAct = dms.filter((d) => !doneShift(d.info.shift.status)), dArc = dms.filter((d) => doneShift(d.info.shift.status));
+    const unA = tAct.some((x) => x.unread), unD = dAct.some((x) => x.unread), unR = tArc.some((x) => x.unread) || dArc.some((x) => x.unread);
+    const tabs = `<div class="tabsx"><span class="chip ${tab === 'team' ? 'on' : ''}" data-act="ctab" data-t="team">Команды · ${tAct.length}${unA ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'dm' ? 'on' : ''}" data-act="ctab" data-t="dm">Личные · ${dAct.length}${unD ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'arc' ? 'on' : ''}" data-act="ctab" data-t="arc">Архив · ${tArc.length + dArc.length}${unR ? ' <i class="dot"></i>' : ''}</span></div>`;
+    let body;
+    if (tab === 'team') body = tAct.length ? tAct.map(teamRow).join('') : emptyState('Командных чатов пока нет', S.role === 'contractor' ? 'Чат команды появится, когда вы примете первого исполнителя.' : 'Чат команды появится, когда подрядчик примет ваш отклик.');
+    else if (tab === 'arc') body = tArc.length || dArc.length
+      ? `<p class="mut sm" style="margin:0 0 8px">Сюда попадают чаты завершённых и отменённых смен. Переписку можно открыть и перечитать.</p>${tArc.length ? `<div class="sect">Команды</div>${tArc.map(teamRow).join('')}` : ''}${dArc.length ? `<div class="sect">Личные</div>${dArc.map(dmRow).join('')}` : ''}`
+      : emptyState('Архив пуст', 'Когда смена завершится, её чаты окажутся здесь.');
+    else body = dAct.length ? dAct.map(dmRow).join('') : emptyState('Личных чатов пока нет', S.role === 'contractor' ? 'Здесь появятся переписки с исполнителями, откликнувшимися на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.');
     const html = `<h1>Чаты</h1>${tabs}${body}`;
     if (ctx.main.dataset.h !== html) { const st = ctx.main.scrollTop; ctx.main.innerHTML = html; ctx.main.dataset.h = html; ctx.main.scrollTop = st; }
   };
   const load = async () => {
     [teams, dms] = await Promise.all([api.teamChats(S.role), api.myDialogs(S.role)]);
-    if (!tab) tab = dms.some((d) => d.unread) && !teams.some((t) => t.unread) ? 'dm' : !teams.length && dms.length ? 'dm' : 'team';
+    const liveT = teams.filter((x) => !doneShift(x.status)), liveD = dms.filter((x) => !doneShift(x.info.shift.status));
+    if (!tab) tab = liveD.some((d) => d.unread) && !liveT.some((t) => t.unread) ? 'dm' : !liveT.length && liveD.length ? 'dm' : 'team';
     draw();
   };
   ctx.main.dataset.h = ''; await load(); ctx.poll = load;
@@ -218,11 +226,12 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
     for (const m of list) {
       if (seen.has(m.id)) continue; seen.add(m.id); last = Math.max(last, m.id); cache[m.id] = m;
       const d = document.createElement('div'); d.className = 'm' + (m.user_id === me ? ' me' : ''); d.dataset.act = 'msg'; d.dataset.id = m.id;
-      d.innerHTML = `<div class="who ${m.role}">${m.user_id === me ? 'Вы' : esc(m.name)}<span class="rt ${m.role}">${{ owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель' }[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
+      d.innerHTML = `<div class="who ${m.role}">${m.user_id === me ? 'Вы' : `<span class="wlink" data-act="uprof" data-id="${m.user_id}" data-r="${m.role}" role="link">${esc(m.name)}</span>`}<span class="rt ${m.role}">${{ owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель' }[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
       box.appendChild(d);
     }
     if (list.length && (near || last === list[list.length - 1].id)) box.scrollTop = box.scrollHeight;
   };
+  ctx.acts.uprof = (el) => go(el.dataset.r === 'owner' ? '#/w/contractor/' + el.dataset.id : '#/c/worker/' + el.dataset.id);
   const pinBar = (list) => { const p = list.find((m) => m.pinned); const el = document.getElementById('pin'); if (el) { el.hidden = !p; if (p) el.textContent = '📌 ' + p.text; } };
   const chatLink = scope.startsWith('shift:') ? '#/team/' + scope.slice(6) : '#/chat/' + scope.slice(3);
   const seenChat = () => api.markRead(chatLink).then(() => refreshMe()).catch(() => {});

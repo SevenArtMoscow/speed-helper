@@ -4,7 +4,7 @@ import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, prefs, toggle } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
-import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote } from './util.js';
+import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce } from './util.js';
 import { reportSheet, shiftName, openLegal } from './screens-common.js';
 
 const FKEY = 'sh_filters_v1';
@@ -27,6 +27,8 @@ async function search(ctx) {
   if (needProfile()) return go('#/w/onboard');
   const F = loadF();
   let mode = sessionStorage.getItem('sh_mode') || 'swipe';
+  if (!['swipe', 'search', 'map'].includes(mode)) mode = 'swipe';   // раньше был режим «Список»
+  let cq = '', cseq = 0;   // поиск подрядчиков: текст и номер запроса (чтобы медленный ответ не затёр свежий)
   let queue = [], next = 0, total = 0, hist = null, loading = false, busy = false, map = null;
 
   const fetchMore = async (reset) => {
@@ -42,7 +44,7 @@ async function search(ctx) {
     const d = { any: 'Все даты', today: 'Сегодня', tomorrow: 'Завтра', weekend: 'Выходные' }[F.date];
     return `${d} · ${{ msk: 'Москва', mo: 'Московская область', any: 'Москва и область' }[F.geo]} · от ${money(F.min_pay)}`;
   };
-  const frame = () => `<div class="row sp" style="margin:2px 0 6px"><div class="tabsx" style="margin:0">${[['swipe', 'Карточки'], ['list', 'Список'], ['map', 'Карта']].map(([k, t]) => `<span class="chip ${mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${t}</span>`).join('')}</div><button class="btn sm" data-act="filters">⚙ Фильтры</button></div><div class="row sp" style="margin-bottom:4px"><span class="mut sm">${summary()}</span><a class="g sm" href="#" data-act="skippedList" id="skn" hidden>↺ Пропущенные</a></div><div id="body"></div>`;
+  const frame = () => `<div class="row sp" style="margin:2px 0 6px"><div class="tabsx" style="margin:0">${[['swipe', 'Карточки'], ['search', 'Поиск'], ['map', 'Карта']].map(([k, t]) => `<span class="chip ${mode === k ? 'on' : ''}" data-act="mode" data-m="${k}">${t}</span>`).join('')}</div><button class="btn sm" data-act="filters" id="flt">⚙ Фильтры</button></div><div class="row sp" id="sumrow" style="margin-bottom:4px"><span class="mut sm">${summary()}</span><a class="g sm" href="#" data-act="skippedList" id="skn" hidden>↺ Пропущенные</a></div><div id="body"></div>`;
   // ссылка на пропущенные смены (с количеством) — видна, если есть что вернуть
   let skipCount = 0;
   const showSkips = (n) => { skipCount = Math.max(0, n); const a = document.getElementById('skn'); if (a) { a.hidden = !skipCount; a.textContent = `↺ Пропущенные · ${skipCount}`; } };
@@ -54,12 +56,33 @@ async function search(ctx) {
   const draw = () => {
     const body = document.getElementById('body'); if (!body) return;
     if (map) { map.remove(); map = null; }
+    const fl = document.getElementById('flt'), sr = document.getElementById('sumrow'); if (fl) fl.hidden = mode === 'search'; if (sr) sr.hidden = mode === 'search';
+    if (mode === 'search') return drawContractors(body);
     if (mode === 'swipe') return drawDeck(body);
     if (!queue.length) { body.innerHTML = empty(); return; }
     if (mode === 'list') { body.innerHTML = queue.map((s) => `<div class="card click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>`).join('') + (next !== null ? '<button class="btn block" data-act="more">Показать ещё</button>' : ''); return; }
     body.innerHTML = '<div id="map" style="height:62vh;border-radius:18px;overflow:hidden"></div>';
     drawMap(document.getElementById('map')).catch((e) => { const el = document.getElementById('map'); if (el) el.outerHTML = `<p class="mut">${esc(e.message)}</p>`; });
   };
+
+  // поиск подрядчиков: по имени или компании; без текста — самые опытные
+  function drawContractors(body) {
+    body.innerHTML = `<input class="i" id="cq" type="search" placeholder="Имя подрядчика или компания" autocomplete="off" enterkeyhint="search" value="${esc(cq)}" aria-label="Поиск подрядчика"><div id="cres" style="margin-top:10px"></div>`;
+    const res = document.getElementById('cres'), inp = document.getElementById('cq');
+    const row = (c) => `<div class="card click row" data-act="openC" data-id="${c.id}">${avatar(c.avatar, c.company || c.name)}<div class="grow"><b>${esc(c.company || c.name)}</b> ${verifiedTag(c.verified, 'Проверен')}${c.company ? `<div class="mut sm">${esc(c.name)}</div>` : ''}<div class="sm">${stars(c.rating, c.reviews)} · ${c.shifts_done} ${plural(c.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>`;
+    const run = async () => {
+      const my = ++cseq, q = inp.value.trim(); cq = inp.value;
+      if (q.length === 1) { res.innerHTML = '<p class="mut sm">Введите хотя бы два символа</p>'; return; }
+      res.innerHTML = '<div class="skel"></div><div class="skel"></div>';
+      try {
+        const list = await api.searchContractors(q); if (my !== cseq) return;
+        res.innerHTML = list.length ? `<div class="mut sm" style="margin:0 0 6px">${q ? 'Найдено' : 'Самые опытные подрядчики'} · ${list.length}</div>${list.map(row).join('')}` : emptyState('Никого не нашли', 'Проверьте написание или введите часть названия.');
+      } catch (e) { if (my === cseq) res.innerHTML = `<p class="mut">${esc(errMsg(e))}</p>`; }
+    };
+    inp.addEventListener('input', debounce(run, 350));
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    run();
+  }
 
   async function drawMap(el) {
     const m = await createMap(el, { center: [CONFIG.DEFAULT_CITY.lat, CONFIG.DEFAULT_CITY.lng], zoom: F.geo === 'msk' ? 9.6 : F.geo === 'mo' ? 8.2 : 8.8 });
@@ -117,7 +140,7 @@ async function search(ctx) {
 
   ctx.render(frame());
   document.getElementById('body').innerHTML = '<div class="skel" style="height:50vh"></div>';
-  await fetchMore(true); draw(); loadSkips().then(() => !queue.length && draw());
+  if (mode !== 'search') await fetchMore(true); draw(); loadSkips().then(() => !queue.length && mode !== 'search' && draw());
 
   ctx.acts.like = () => decide('like'); ctx.acts.skip = () => decide('skip'); ctx.acts.save = () => decide('save');
   ctx.acts.undo = async () => {
@@ -138,9 +161,10 @@ async function search(ctx) {
     const r = await api.feed({ ...F, date: 'any', min_pay: 0, geo: 'any', similar_to: base.id, include_skipped: true }); queue = r.items; next = r.next; draw();
     if (!queue.length) toast('Похожих смен нет');
   };
-  ctx.acts.mode = async (el) => { mode = el.dataset.m; sessionStorage.setItem('sh_mode', mode); document.querySelectorAll('[data-act=mode]').forEach((c) => c.classList.toggle('on', c.dataset.m === mode)); await fetchMore(true); draw(); };
+  ctx.acts.mode = async (el) => { mode = el.dataset.m; sessionStorage.setItem('sh_mode', mode); document.querySelectorAll('[data-act=mode]').forEach((c) => c.classList.toggle('on', c.dataset.m === mode)); if (mode !== 'search') await fetchMore(true); draw(); };
+  ctx.acts.openC = (el) => go('#/w/contractor/' + el.dataset.id);
   ctx.acts.filters = () => filtersSheet(F, async () => { saveF(F); ctx.render(''); search(ctx); });
-  ctx.poll = async () => { if (!busy && mode !== 'map' && queue.length < 3 && next === null) { const before = queue.length; await fetchMore(true); if (queue.length !== before && !document.querySelector('.sheet')) draw(); } };
+  ctx.poll = async () => { if (!busy && mode !== 'map' && mode !== 'search' && queue.length < 3 && next === null) { const before = queue.length; await fetchMore(true); if (queue.length !== before && !document.querySelector('.sheet')) draw(); } };
   ctx.cleanup = () => { if (map) map.remove(); map = null; };
 }
 
@@ -292,7 +316,7 @@ async function top(ctx) {
   const draw = async () => {
     const r = await api.leaderboard(per);
     const prizes = (S.cfg && S.cfg.prizes) || 'Лучшие исполнители месяца получают призы. Условия и призы объявит администратор.';
-    const row = (x) => `<div class="lb ${x.rank <= 3 ? 'p' + x.rank : ''} ${x.user_id === S.user.id ? 'me' : ''} click" data-act="prof" data-id="${x.user_id}"><div class="rk">${x.rank <= 3 ? MEDAL[x.rank - 1] : x.rank}</div>${avatar(x.avatar, x.name, 'sm')}<div class="grow"><b>${esc(x.name)}${x.user_id === S.user.id ? ' (вы)' : ''}</b><div class="mut sm">${x.shifts} ${plural(x.shifts, 'смена', 'смены', 'смен')}${x.rating != null ? ` · ★ ${x.rating}` : ''}</div></div><div class="sc"><b>${x.score}</b><span>очков</span></div></div>`;
+    const row = (x) => `<div class="lb ${x.rank <= 3 ? 'p' + x.rank : ''} ${x.user_id === S.user.id ? 'me' : ''} click" data-act="prof" data-id="${x.user_id}"><div class="rk">${x.rank <= 3 ? MEDAL[x.rank - 1] : x.rank}</div>${avatar(x.avatar, x.name, 'sm')}<div class="grow"><b>${esc(x.name)}${x.user_id === S.user.id ? ' (вы)' : ''}</b><div class="mut sm">${x.shifts} ${plural(x.shifts, 'смена', 'смены', 'смен')}${x.rating != null ? ` · ★ ${x.rating}` : ''}</div></div><div class="lbs"><b>${x.score}</b><span>очков</span></div></div>`;
     const inTop = r.me && r.top.some((x) => x.user_id === S.user.id);
     const mine = !S.user.roles.includes('worker') ? '' : r.me ? (inTop ? '' : `<div class="card"><b>Ваше место: ${r.me.rank}</b><div class="mut sm">${r.me.score} очков · ${r.me.shifts} ${plural(r.me.shifts, 'смена', 'смены', 'смен')}</div></div>`)
       : '<div class="card"><b>Вы пока вне рейтинга</b><div class="mut sm">Выполните смену и получите оценку — и вы появитесь в таблице.</div></div>';
@@ -309,12 +333,17 @@ async function top(ctx) {
 async function contractorPage(ctx, id) {
   id = Number(id);
   const P = await api.contractorPage(id), c = P.contractor;
+  const cap = (n) => (n > 99 ? '99+' : String(n || 0));
+  const tabKey = 'sh_ctab_' + id; let tab = sessionStorage.getItem(tabKey) === 'done' ? 'done' : 'act';
+  const shiftRows = (arr, empty) => (arr.length ? arr.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${esc(payLabel(s))}</span></div>`).join('') : `<p class="mut">${empty}</p>`);
   ctx.render(`${pageHead(c.company || c.name, '<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button>')}${heroCard({ rev: ['contractor', id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}<button class="btn block ${P.is_fav ? 'favon' : 'pri'}" data-act="fav">${P.is_fav ? '★ В избранном' : '☆ В избранное'}</button>
-    <h2>Актуальные смены</h2>${P.shifts.length ? P.shifts.map((s) => `<div class="card click row sp" data-act="open" data-id="${s.id}"><div class="grow"><b>${esc(s.title)}</b><div class="mut sm">${esc(dateLabel(s.date))}</div></div><span class="pay-tag">${esc(payLabel(s))}</span></div>`).join('') : '<p class="mut">У этого подрядчика сейчас нет актуальных смен.</p>'}
+    <div class="ptabs"><button class="ptab ${tab === 'act' ? 'on' : ''}" data-act="ptab" data-t="act">Актуальные<sup>${cap(P.active_count ?? P.shifts.length)}</sup></button><button class="ptab ${tab === 'done' ? 'on' : ''}" data-act="ptab" data-t="done">Завершённые<sup>${cap(P.completed_count || 0)}</sup></button></div>
+    <div id="plist">${tab === 'act' ? shiftRows(P.shifts, 'У этого подрядчика сейчас нет актуальных смен.') : shiftRows(P.completed || [], 'Завершённых смен пока нет.')}</div>
     ${reviewsBlock(P.reviews, c.reviews, 'contractor', id)}`);
   bindReviews(ctx);
+  ctx.acts.ptab = (el) => { tab = el.dataset.t; sessionStorage.setItem(tabKey, tab); document.querySelectorAll('.ptab').forEach((b) => b.classList.toggle('on', b.dataset.t === tab)); document.getElementById('plist').innerHTML = tab === 'act' ? shiftRows(P.shifts, 'У этого подрядчика сейчас нет актуальных смен.') : shiftRows(P.completed || [], 'Завершённых смен пока нет.'); };
   ctx.acts.fav = async () => { const on = await api.toggleFav(id); toast(on ? 'Добавлено в избранное' : 'Убрано из избранного', 'ok'); contractorPage(ctx, id); };
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.rep = () => reportSheet('contractor', id);
@@ -329,7 +358,7 @@ export function profileBlock(w, own) {
       stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
     + (w.about ? `<div class="about">${esc(w.about)}</div>` : '') + infoRows(rows)
     + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')
-    + (phone10(w.phone) ? `<a class="callbtn" href="tel:+7${phone10(w.phone)}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>Позвонить</small></a>` : '');
+    + (phone10(w.phone) ? `<button class="callbtn" data-act="call" data-phone="+7${phone10(w.phone)}" data-name="${esc(w.name || '')}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>Позвонить</small></button>` : '');
 }
 // что именно добавить в профиль: пункты с «+N%», по нажатию — сразу в редактирование
 const TODO = [['avatar', 'Добавьте фото', 10, (w) => !!w.avatar], ['experience', 'Расскажите об опыте', 10, (w) => !!w.experience], ['skills', 'Укажите навыки', 10, (w) => (w.skills || []).length > 0],
@@ -343,7 +372,7 @@ function todoList(w) {
 async function profile(ctx) {
   const u = await refreshMe(); const w = u.worker, ok = w.percent >= CONFIG.MIN_VERIFIED_PERCENT;
   const P = await api.workerPage(u.id).catch(() => null), R = await api.userReviews(u.id, 'worker', 0).catch(() => null);
-  const active = P && P.active.length ? sect('Активные задания') + P.active.map((a) => `<div class="card click row sp" data-act="openShift" data-id="${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>›</div>`).join('') : '';
+  const active = P && (P.active || []).length ? sect('Активные задания') + P.active.map((a) => `<div class="card click row sp" data-act="openShift" data-id="${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>›</div>`).join('') : '';
   ctx.render(`${profileBlock(w, true)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${todoList(w)}</div>

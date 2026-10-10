@@ -228,9 +228,18 @@ const API = {
     return kind === 'worker' ? ids.filter((i) => db.workers[i]).map((i) => workerView(i)) : ids.filter((i) => db.contractors[i]).map((i) => ({ ...contractorView(i), open_shifts: db.shifts.filter((s) => s.contractor_id === i && s.status === 'open' && !s.hidden && s.date >= todayISO()).length }));
   },
   favIds(me) { return db.favorites.filter((f) => f.user_id === me).map((f) => f.target_id); },
+  searchContractors(me, q) {
+    actor(me); q = String(q || '').trim().toLowerCase().slice(0, 60);
+    return Object.keys(db.contractors).map(Number).filter((id) => id !== me && (!db.users.find((u) => u.id === id) || !db.users.find((u) => u.id === id).blocked))
+      .map((id) => ({ id, c: db.contractors[id] })).filter(({ c }) => !q || String(c.company || '').toLowerCase().includes(q) || String(c.name || '').toLowerCase().includes(q))
+      .sort((a, b) => contractorDone(b.id) - contractorDone(a.id)).slice(0, 20).map(({ id }) => contractorView(id));
+  },
   contractorPage(me, cid) {
     actor(me);
-    return { contractor: contractorView(cid), shifts: db.shifts.filter((s) => s.contractor_id === cid && s.status === 'open' && !s.hidden && s.date >= todayISO()).map((s) => shiftView(s, me, null)),
+    const open = db.shifts.filter((s) => s.contractor_id === cid && s.status === 'open' && !s.hidden && s.date >= todayISO());
+    const done = db.shifts.filter((s) => s.contractor_id === cid && s.status === 'completed' && !s.hidden).sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start));
+    return { contractor: contractorView(cid), active_count: open.length, completed_count: done.length, completed: done.slice(0, 30).map((s) => shiftView(s, me, null)),
+      shifts: open.map((s) => shiftView(s, me, null)),
       reviews: db.reviews.filter((r) => r.to_user === cid).slice(-10).reverse().map((r) => ({ ...r, from_name: (db.workers[r.from_user] || db.contractors[r.from_user] || {}).name })), is_fav: db.favorites.some((f) => f.user_id === me && f.target_id === cid) };
   },
   workerPage(me, wid) {
@@ -410,6 +419,14 @@ const API = {
     actor(me); const a = db.applications.find((x) => x.id === appId); if (!a) fail('not_found'); assertChat(me, 'dm:' + appId);
     const s = shiftOr404(a.shift_id);
     return { application: a, shift: shiftView(s, me, null), worker: workerView(a.worker_id), can_manage: canManage(s, me, 'applications'), title: me === a.worker_id ? (db.contractors[s.contractor_id] || {}).name : (db.workers[a.worker_id] || {}).name };
+  },
+  // командные чаты (для разработки без сервера; на сервере — api_teamChats)
+  teamChats(me, role) {
+    actor(me);
+    return db.shifts.filter((s) => s.status !== 'cancelled' && (role === 'contractor' ? s.contractor_id === me && db.members.some((m) => m.shift_id === s.id && m.role !== 'owner')
+      : db.members.some((m) => m.shift_id === s.id && m.user_id === me && m.role !== 'owner')))
+      .map((s) => { const last = [...db.messages].reverse().find((m) => m.scope === 'shift:' + s.id); return { ...shiftView(s, me, null), last: last ? msgView(last) : null, unread: db.notifications.some((n) => n.user_id === me && !n.read && n.type === 'message' && n.link === '#/team/' + s.id) }; })
+      .sort((x, y) => (y.last ? y.last.at : 0) - (x.last ? x.last.at : 0));
   },
   myDialogs(me) {
     actor(me);

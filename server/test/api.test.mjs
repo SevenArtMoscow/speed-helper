@@ -510,6 +510,22 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await no('SEC: огромные критерии отзыва отклонены', W3.call('submitReview', { shift_id: RV.id, to_user: C2.id, stars: 5, criteria: { a: 'я'.repeat(700) }, text: 'ок' }), 'invalid');
   await ok('SEC: обычный отзыв проходит', W3.call('submitReview', { shift_id: RV.id, to_user: C2.id, stars: 5, criteria: { 'Условия': 5 }, text: 'ок' }));
 
+  // ---- поиск подрядчиков и вкладки профиля подрядчика ----
+  const SR = await login(7201, 'Ищущий');
+  await ok('FIND: профиль исполнителя', SR.call('saveWorker', { ...wp, name: 'Ищущий Олег' }));
+  await ok('FIND: поиск по части названия компании находит подрядчика', SR.call('searchContractors', 'двойной'), (b) => b.some((c) => /Двойной/.test(c.name)) && b.every((c) => c.id && 'rating' in c && 'shifts_done' in c));
+  await ok('FIND: регистр и пробелы не мешают', SR.call('searchContractors', '  ДВОЙНОЙ  '), (b) => b.some((c) => /Двойной/.test(c.name)));
+  await ok('FIND: без текста — самые опытные, не больше 20', SR.call('searchContractors', ''), (b) => Array.isArray(b) && b.length > 0 && b.length <= 20);
+  await ok('FIND: нет совпадений — пустой список', SR.call('searchContractors', 'zzzzнетакого'), (b) => Array.isArray(b) && b.length === 0);
+  await ok('FIND: символы % и _ не работают как шаблон', SR.call('searchContractors', '%'), (b) => b.length === 0);
+  await ok('FIND: себя в поиске нет', DR.call('searchContractors', 'двойной'), (b) => !b.some((c) => c.id === DR.id));
+  await ok('FIND: поиск доступен и подрядчику', C2.call('searchContractors', ''), (b) => Array.isArray(b));
+  await ok('FIND: заблокированный подрядчик в поиске не виден', A.call('adminBlock', DR.id, true));
+  await ok('FIND: …и не находится', SR.call('searchContractors', 'двойной'), (b) => !b.some((c) => c.id === DR.id));
+  await ok('FIND: разблокировали', A.call('adminBlock', DR.id, false));
+  await ok('FIND: профиль подрядчика содержит счётчики и завершённые', SR.call('contractorPage', C2.id), (b) => typeof b.active_count === 'number' && typeof b.completed_count === 'number' && Array.isArray(b.completed) && b.completed_count >= 1 && b.completed.length >= 1 && b.completed.length <= 30);
+  await ok('FIND: счётчики активных совпадают со списком', SR.call('contractorPage', C2.id), (b) => b.active_count === b.shifts.length);
+
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);
 });

@@ -38,7 +38,7 @@ setInterval(() => { const t = Date.now() - 3600e3; for (const [k, a] of hits) if
 // запросы за nginx: реальный адрес приходит в X-Real-IP (порт 3000 наружу закрыт и слушает только 127.0.0.1)
 const clientIp = (req) => String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
 // дополнительные лимиты на «дорогие» и спам-опасные методы: [запросов, окно в мс]
-const FN_LIMITS = { sendMessage: [40, 60e3], createShift: [15, 3600e3], apply: [150, 3600e3], report: [10, 3600e3], saveWorker: [30, 3600e3], saveContractor: [30, 3600e3], logError: [30, 60e3], track: [120, 60e3], deleteAccount: [3, 3600e3] };
+const FN_LIMITS = { sendMessage: [40, 60e3], createShift: [15, 3600e3], apply: [150, 3600e3], report: [10, 3600e3], saveWorker: [30, 3600e3], saveContractor: [30, 3600e3], logError: [30, 60e3], track: [120, 60e3], searchContractors: [60, 60e3], deleteAccount: [3, 3600e3] };
 const BIG_BODY = new Set(['saveWorker', 'saveContractor']);   // только они несут фото (до 400 КБ)
 const RATE_MSG = { message: 'Слишком много действий подряд — подождите минуту и повторите', hint: 'rate' };
 

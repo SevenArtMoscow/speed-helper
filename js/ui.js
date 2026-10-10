@@ -75,6 +75,14 @@ export function openBot(start) {
   const url = `https://t.me/${name}${start ? '?start=' + start : ''}`;
   if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank', 'noopener');
 }
+// «Позвонить»: номер крупно (его можно нажать и удержать), кнопка вызова и копирование — на случай, если вызов из Telegram не открылся
+export function callSheet(phone, name = '') {
+  const num = String(phone || '').replace(/[^\d+]/g, ''), pretty = fmtPhone(num);
+  const s = sheet(`<h3>${name ? esc(name) : 'Позвонить'}</h3><a class="callnum" href="tel:${esc(num)}">${esc(pretty)}</a>
+    <a class="btn pri block" href="tel:${esc(num)}" id="cc">Позвонить</a><button class="btn block" id="cp" style="margin-top:8px">Скопировать номер</button>
+    <p class="mut sm" style="margin-top:10px">Если вызов не открылся, скопируйте номер и наберите его вручную.</p>`);
+  s.el.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(num); toast('Номер скопирован', 'ok'); s.close(); } catch { toast('Не удалось скопировать — нажмите на номер выше', 'err'); } };
+}
 export const proBadge = () => (CONFIG.PRO_ENABLED ? `<span class="pro-b">${ICON.crown}PRO</span>` : '');
 export function heroCard({ av, name, sub = '', tags = '', stats = [], verified = false, rev = null, pro = false }) {
   pro = pro && CONFIG.PRO_ENABLED;

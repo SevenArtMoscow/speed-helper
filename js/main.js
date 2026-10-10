@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
-import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, ICON, haptic } from './ui.js';
+import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, callSheet, ICON, haptic } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
@@ -54,6 +54,7 @@ function shell() {
     if (name === 'back') return back();
     if (name === 'bell') return go('#/notifications');
     if (name === 'top') return go('#/w/top');
+    if (name === 'call') return callSheet(el.dataset.phone, el.dataset.name);
     const fn = ctx.acts[name]; if (!fn) return;
     haptic('light');
     el.dataset.busy = '1'; // защита от повторных нажатий

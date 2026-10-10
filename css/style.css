@@ -249,7 +249,7 @@ button.stat::after{content:'›';position:absolute;right:14px;top:50%;transform:
 .lb .rk{width:34px;text-align:center;font-weight:900;font-size:17px;color:var(--mut);flex:none}
 .lb.p1 .rk,.lb.p2 .rk,.lb.p3 .rk{font-size:24px}
 .lb.p1{border-color:rgba(255,204,51,.55);background:linear-gradient(120deg,rgba(255,204,51,.12),var(--card))}.lb.p2{border-color:rgba(190,200,215,.45)}.lb.p3{border-color:rgba(205,127,50,.5)}
-.lb .sc{margin-left:auto;text-align:right;flex:none}.lb .sc b{display:block;font-size:18px;color:var(--g)}.lb .sc span{font-size:11px;color:var(--mut)}
+.lb .lbs{margin-left:auto;text-align:right;flex:none}.lb .lbs b{display:block;font-size:18px;color:var(--g)}.lb .lbs span{font-size:11px;color:var(--mut)}
 .lb.me{border-color:var(--g);box-shadow:0 0 0 1px rgba(57,255,106,.4)}
 .topbtn svg{width:24px;height:24px;color:var(--or)}
 
@@ -347,3 +347,12 @@ main.anim>*:nth-child(6){animation-delay:.2s}main.anim>*:nth-child(7){animation-
 .gate-ic{width:56px;height:56px;border-radius:18px;margin:0 auto 12px;display:grid;place-items:center;background:rgba(57,255,106,.12);color:var(--g)}.gate-ic svg{width:28px;height:28px}
 .gate h2{margin:0 0 8px}.gate-steps{text-align:left;margin:14px 0 16px;padding-left:20px;color:var(--mut);font-size:14px;line-height:1.6}
 .okline{margin-top:10px;padding:10px 14px;border-radius:14px;background:rgba(57,255,106,.1);color:var(--g);font-size:14px;font-weight:600}
+
+/* ссылка на профиль в чате, вкладки профиля подрядчика, номер в окне звонка */
+.m .who .wlink{cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35);text-underline-offset:3px}
+.ptabs{display:flex;gap:6px;margin:16px 0 10px;border-bottom:1px solid var(--line)}
+.ptab{flex:1;padding:12px 6px 10px;font-weight:700;font-size:16px;color:var(--mut);border-bottom:3px solid transparent;margin-bottom:-1px;text-align:center}
+.ptab sup{margin-left:3px;font-size:12px;color:var(--mut);font-weight:700}
+.ptab.on{color:var(--txt);border-bottom-color:var(--txt)}.ptab.on sup{color:var(--g)}
+.callnum{display:block;text-align:center;font-size:26px;font-weight:800;margin:6px 0 14px;color:var(--txt);text-decoration:none;letter-spacing:.3px}
+button.callbtn{width:100%;border:0;font-family:inherit;text-align:left;cursor:pointer}

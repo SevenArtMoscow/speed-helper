@@ -18,7 +18,7 @@ async function home(ctx) {
   const load = async () => {
     const [st, list] = await Promise.all([api.contractorStats(), api.myShifts()]);
     const act = list.filter((s) => ['open', 'full'].includes(s.status)).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
-    const html = `<h1>Главная</h1><div class="grid2" style="margin:10px 0"><button class="stat" data-act="go" data-to="#/c/shifts"><b>${st.active}</b>Активные смены</button><button class="stat" data-act="go" data-to="#/c/shifts/new"><b>${st.new_applications}</b>Новые отклики</button><button class="stat" data-act="go" data-to="#/c/workers"><b>${st.workers}</b>Исполнители</button><button class="stat o" data-act="go" data-to="#/c/shifts/done"><b>${st.done}</b>Завершённые</button></div>
+    const html = `<h1>Главная</h1><div class="grid2" style="margin:10px 0"><button class="stat" data-act="go" data-to="#/c/shifts/act"><b>${st.active}</b>Активные смены</button><button class="stat" data-act="go" data-to="#/c/shifts/new"><b>${st.new_applications}</b>Новые отклики</button><button class="stat" data-act="go" data-to="#/c/workers"><b>${st.workers}</b>Исполнители</button><button class="stat o" data-act="go" data-to="#/c/shifts/done"><b>${st.done}</b>Завершённые</button></div>
       <button class="btn pri block" data-act="create" style="padding:15px">＋ Опубликовать смену</button>
       <button class="btn block" data-act="go" data-to="#/c/fav" style="margin-top:8px">★ Избранные исполнители</button>
       <h2>Открытые смены</h2>${act.length ? act.slice(0, 20).map((s) => shiftRow(s)).join('') : `<div class="empty"><h2>У вас пока нет открытых смен.</h2></div>`}`;
@@ -31,12 +31,13 @@ async function home(ctx) {
 async function shifts(ctx, mode) {
   if (need()) return go('#/c/onboard');
   let tab = mode === 'new' ? 'new' : mode === 'done' ? 'done' : 'act';
+  const entryTitle = { act: 'Активные смены', new: 'Новые отклики', done: 'Завершённые смены' }[mode];   // зашли с плитки на главной — показываем «Назад»
   const ACT = ['open', 'full'];
   const T = [['act', 'Активные', (s) => ACT.includes(s.status)], ['new', 'С откликами', (s) => ACT.includes(s.status) && s.pending_count > 0], ['done', 'Завершённые', (s) => s.status === 'completed', 'o'], ['off', 'Отменённые', (s) => s.status === 'cancelled']];
   let list = [];
   const draw = () => {
     const cur = T.find((t) => t[0] === tab), l = list.filter(cur[2]);
-    const html = `<div class="row sp"><h1>Смены</h1><button class="btn pri sm" data-act="create">＋ Создать</button></div><div class="tabsx">${T.map(([k, t, f, c]) => `<span class="chip ${c || ''} ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t} · ${list.filter(f).length}</span>`).join('')}</div>${l.length ? l.map((s) => shiftRow(s)).join('') : emptyState(tab === 'act' ? 'У вас пока нет открытых смен.' : tab === 'new' ? 'Новых откликов нет' : 'Здесь пока пусто', '', tab === 'act' ? '<button class="btn pri" data-act="create">Создать смену</button>' : '')}`;
+    const html = `${entryTitle ? pageHead(entryTitle, '<button class="btn pri sm" data-act="create">＋ Создать</button>') : '<div class="row sp"><h1>Смены</h1><button class="btn pri sm" data-act="create">＋ Создать</button></div>'}<div class="tabsx">${T.map(([k, t, f, c]) => `<span class="chip ${c || ''} ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t} · ${list.filter(f).length}</span>`).join('')}</div>${l.length ? l.map((s) => shiftRow(s)).join('') : emptyState(tab === 'act' ? 'У вас пока нет открытых смен.' : tab === 'new' ? 'Новых откликов нет' : 'Здесь пока пусто', '', tab === 'act' ? '<button class="btn pri" data-act="create">Создать смену</button>' : '')}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
   const load = async () => { list = await api.myShifts(); draw(); };
@@ -287,7 +288,7 @@ async function workerPage(ctx, wid) {
 
 async function fav(ctx) {
   const list = await api.favorites('worker');
-  ctx.render(`<h1>Избранное</h1><p class="mut sm">Исполнители, с которыми вы хотите работать снова</p>${list.length ? list.map((w) => `<div class="card click row" data-act="p" data-id="${w.user_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${w.pro ? proBadge() : ''}${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>`).join('') : emptyState('Пока пусто', 'Добавляйте исполнителей в избранное в их профиле.')}`);
+  ctx.render(`${pageHead('Избранные исполнители')}<p class="mut sm">Исполнители, с которыми вы хотите работать снова</p>${list.length ? list.map((w) => `<div class="card click row" data-act="p" data-id="${w.user_id}">${avatar(w.avatar, w.name)}<div class="grow"><b>${esc(w.name)}</b> ${w.pro ? proBadge() : ''}${verifiedTag(w.verified, 'Проверен')}<div class="sm">${stars(w.rating, w.reviews)} · ${w.shifts_done} ${plural(w.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>`).join('') : emptyState('Пока пусто', 'Добавляйте исполнителей в избранное в их профиле.')}`);
   ctx.acts.p = (el) => go('#/c/worker/' + el.dataset.id);
 }
 
@@ -302,6 +303,6 @@ async function profile(ctx) {
 }
 
 export const contractorRoutes = [
-  [/^#\/c\/home$/, home], [/^#\/c\/shifts(?:\/(new|done))?$/, shifts], [/^#\/c\/workers$/, workers], [/^#\/c\/create$/, createOrEdit], [/^#\/c\/edit\/(\d+)$/, createOrEdit], [/^#\/c\/shift\/(\d+)$/, shiftPage],
+  [/^#\/c\/home$/, home], [/^#\/c\/shifts(?:\/(act|new|done))?$/, shifts], [/^#\/c\/workers$/, workers], [/^#\/c\/create$/, createOrEdit], [/^#\/c\/edit\/(\d+)$/, createOrEdit], [/^#\/c\/shift\/(\d+)$/, shiftPage],
   [/^#\/c\/worker\/(\d+)$/, workerPage], [/^#\/c\/fav$/, fav], [/^#\/c\/profile$/, profile],
 ];
