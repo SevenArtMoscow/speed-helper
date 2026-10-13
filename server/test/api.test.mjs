@@ -21,6 +21,9 @@ http.createServer((req, res) => {
   });
 }).listen(SMSPORT, '127.0.0.1');
 const db = await PGlite.create();
+// встроенная PostgreSQL не принимает параметры подключения (options=-c timezone=…), поэтому московское время выставляем самой базе —
+// иначе с 00:00 до 03:00 МСК «сегодня» в тесте и в базе расходится и проверки прошедших смен падают (CI работает в UTC)
+await db.exec("set timezone to 'Europe/Moscow'");
 const sock = new PGLiteSocketServer({ db, port: DBPORT, host: '127.0.0.1' });
 await sock.start();
 Object.assign(process.env, { DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${DBPORT}/postgres?sslmode=disable`, PG_POOL_MAX: '1', PORT: String(PORT), DISABLE_BOT: '1', TG_BOT_TOKEN: TOKEN,
