@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
-import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, callSheet, ICON, haptic } from './ui.js';
+import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, callSheet, ICON, haptic, notifyFeel } from './ui.js';
 import { $, esc } from './util.js';
 import { commonRoutes } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
@@ -80,6 +80,11 @@ function rise(main) {
     (function f(now) { const k = Math.min(1, (now - t0) / 700), e = 1 - Math.pow(1 - k, 3); b.textContent = k < 1 ? Math.round(to * e) : t; if (k < 1) requestAnimationFrame(f); })(t0);
   });
 }
+// экран ошибки с кнопкой перезагрузки (обработчик вешается из кода: встроенные onclick запрещены политикой CSP)
+function errorScreen(html) {
+  ctx.render(`<div class="empty">${html}</div>`);
+  const b = ctx.main.querySelector('[data-reload]'); if (b) b.addEventListener('click', () => location.reload());
+}
 let navToken = 0;
 async function route() {
   const hash = location.hash || '#/';
@@ -106,13 +111,17 @@ async function route() {
   } catch (e) {
     console.error(e);
     if (my !== navToken) return;
-    ctx.render(`<div class="empty"><h2>Что-то пошло не так</h2><p>${esc(errMsg(e))}</p><button class="btn pri" onclick="location.reload()">Обновить</button></div>`);
+    errorScreen(`<h2>Что-то пошло не так</h2><p>${esc(errMsg(e))}</p><button class="btn pri" data-reload>Обновить</button>`);
   }
 }
 
 async function tick() {
   if (document.hidden || !S.user) return;
-  try { const u = await api.me(); if (unreadOf(u, S.role) !== unreadOf(S.user, S.role)) { S.user = u; setBell(); } else S.user = u; if (ctx.poll) await ctx.poll(); } catch {}
+  try {
+    const u = await api.me(), was = unreadOf(S.user, S.role), now = unreadOf(u, S.role);
+    S.user = u; if (now !== was) setBell(); if (now > was) notifyFeel();
+    if (ctx.poll) await ctx.poll();
+  } catch {}
 }
 
 async function boot() {
@@ -132,7 +141,7 @@ async function boot() {
     splash.step(76);
     publicConfig().then((c) => (S.cfg = c));
   } catch (e) {
-    ctx.render(`<div class="empty"><h2>Не удалось войти</h2><p>${esc(errMsg(e))}</p>${tg ? '' : '<p class="sm">Откройте приложение через Telegram-бота.</p>'}<button class="btn pri" onclick="location.reload()">Повторить</button></div>`);
+    errorScreen(`<h2>Не удалось войти</h2><p>${esc(errMsg(e))}</p>${tg ? '' : '<p class="sm">Откройте приложение через Telegram-бота.</p>'}<button class="btn pri" data-reload>Повторить</button>`);
     splash.finish();
     return;
   }

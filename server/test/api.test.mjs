@@ -3,20 +3,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import http from 'node:http';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 
-const TOKEN = '123456:TEST_ONLY', PORT = 3199, DBPORT = 54329;
+const TOKEN = '123456:TEST_ONLY', PORT = 3199, DBPORT = 54329, SMSPORT = 3198, AGENT_TG = 777000;
+// подставной sms.ru: запоминает отправленные коды; на номер 9990000000 отвечает ошибкой
+const smsCodes = {};
+http.createServer((req, res) => {
+  const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
+    const p = new URLSearchParams(Buffer.concat(chunks).toString()), to = p.get('to');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (p.get('api_id') !== 'test-key' || to === '79990000000') return res.end(JSON.stringify({ status: 'ERROR', status_text: 'test failure' }));
+    smsCodes[to] = (p.get('msg').match(/\d{6}/) || [])[0];
+    res.end(JSON.stringify({ status: 'OK', sms: { [to]: { status: 'OK' } } }));
+  });
+}).listen(SMSPORT, '127.0.0.1');
 const db = await PGlite.create();
 const sock = new PGLiteSocketServer({ db, port: DBPORT, host: '127.0.0.1' });
 await sock.start();
 Object.assign(process.env, { DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${DBPORT}/postgres?sslmode=disable`, PG_POOL_MAX: '1', PORT: String(PORT), DISABLE_BOT: '1', TG_BOT_TOKEN: TOKEN,
-  JWT_SECRET: 'test-secret', ADMIN_TG_IDS: '1', APP_URL: `http://127.0.0.1:${PORT}`, OPERATOR_NAME: 'ООО Тестовый оператор', OPERATOR_CONTACT: 'help@example.test', SUPPORT_URL: 'https://t.me/test_support', NODE_ENV: 'test', RATE_MULT: '10' });
+  JWT_SECRET: 'test-secret', ADMIN_TG_IDS: '1', APP_URL: `http://127.0.0.1:${PORT}`, OPERATOR_NAME: 'ООО Тестовый оператор', OPERATOR_CONTACT: 'help@example.test', SUPPORT_URL: 'https://t.me/test_support', NODE_ENV: 'test', RATE_MULT: '10',
+  SMS_PROVIDER: 'smsru', SMSRU_API_ID: 'test-key', SMSRU_URL: `http://127.0.0.1:${SMSPORT}`, SUPPORT_TG_IDS: String(AGENT_TG), TG_BOT_TOKEN_OLD: '654321:OLD_TEST' });
 await import('../server.js');
 const ROOT = `http://127.0.0.1:${PORT}`, BASE = ROOT + '/api';
 for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
 
-const initData = (user) => { const p = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify(user) }); const c = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n'); p.set('hash', crypto.createHmac('sha256', crypto.createHmac('sha256', 'WebAppData').update(TOKEN).digest()).update(c).digest('hex')); return p.toString(); };
+const initData = (user, token = TOKEN) => { const p = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify(user) }); const c = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n'); p.set('hash', crypto.createHmac('sha256', crypto.createHmac('sha256', 'WebAppData').update(token).digest()).update(c).digest('hex')); return p.toString(); };
 async function login(id, name, unverified = false) {
   const r = await (await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id, first_name: name }) }) })).json();
   const call = async (fn, ...args) => { const res = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + r.access_token }, body: JSON.stringify({ fn, args }) }); const j = await res.json().catch(() => ({})); return { status: res.status, body: j }; };
@@ -525,6 +539,147 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('FIND: разблокировали', A.call('adminBlock', DR.id, false));
   await ok('FIND: профиль подрядчика содержит счётчики и завершённые', SR.call('contractorPage', C2.id), (b) => typeof b.active_count === 'number' && typeof b.completed_count === 'number' && Array.isArray(b.completed) && b.completed_count >= 1 && b.completed.length >= 1 && b.completed.length <= 30);
   await ok('FIND: счётчики активных совпадают со списком', SR.call('contractorPage', C2.id), (b) => b.active_count === b.shifts.length);
+
+  // ---- безопасность перед запуском: фото, ссылки, ключи, критерии, избранное, блокировка, права админа, лимиты, CSP ----
+  const PL = await login(7301, 'Предстарт');
+  await no('PRE: фото — не картинка', PL.call('saveWorker', { ...wp, name: 'Предстарт', avatar: 'javascript:alert(1)' }), 'invalid');
+  await no('PRE: фото — внешняя ссылка', PL.call('saveWorker', { ...wp, name: 'Предстарт', avatar: 'https://evil.example/x.png' }), 'invalid');
+  await no('PRE: фото — HTML под видом картинки', PL.call('saveWorker', { ...wp, name: 'Предстарт', avatar: 'data:image/png;base64,AA" onerror="x' }), 'invalid');
+  await no('PRE: фото — слишком большое', PL.call('saveWorker', { ...wp, name: 'Предстарт', avatar: 'data:image/jpeg;base64,' + 'A'.repeat(120000) }), 'invalid');
+  await no('PRE: ссылка в имени', PL.call('saveWorker', { ...wp, name: 'Пиши t.me/scam' }), 'invalid');
+  await no('PRE: сайт в имени', PL.call('saveWorker', { ...wp, name: 'Иван work-money.ru' }), 'invalid');
+  await ok('PRE: обычное фото и имя проходят', PL.call('saveWorker', { ...wp, name: 'Предстарт Иван И.', avatar: 'data:image/jpeg;base64,' + 'A'.repeat(20000) }));
+  await ok('PRE: svg-аватар (симулятор) проходит', PL.call('saveWorker', { ...wp, name: 'Предстарт Иван', avatar: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' }));
+  await no('PRE: @username в названии компании', PL.call('saveContractor', { ...cp, name: 'Предстарт', company: 'ООО @scam_channel' }), 'invalid');
+  await no('PRE: ссылка в названии смены', C2.call('createShift', { ...sp, title: 'Заработок www.scam.ru', date: day(16) }, key()), 'invalid');
+  await ok('PRE: адрес с точками (ул., д.) не считается ссылкой', C2.call('createShift', { ...sp, title: 'Склад ул. Ленина, д.5', date: day(16) }, key()));
+  await no('PRE: огромный ключ идемпотентности смены', C2.call('createShift', { ...sp, title: 'Длинный ключ', date: day(16) }, 'k'.repeat(5000)), 'invalid');
+  await no('PRE: огромный ключ идемпотентности сообщения', W1.call('sendMessage', 'shift:' + S1.id, 'привет', 'k'.repeat(5000)), 'invalid');
+  await no('PRE: в избранное — несуществующий пользователь', PL.call('toggleFav', 999999), 'not_found');
+  await no('PRE: в избранное — сам себя', PL.call('toggleFav', PL.id), 'not_found');
+  await no('PRE: пропуск несуществующей смены — понятная ошибка, а не 500', PL.call('skip', 999999), 'not_found');
+  // критерии отзыва: только оценки 1–5 (раньше значение выводилось на страницу как есть)
+  const RV2 = await ok('PRE: смена для отзыва', C2.call('createShift', { ...sp, title: 'Отзыв с критериями', date: day(16) }, key()));
+  const rv2a = await ok('PRE: отклик', W3.call('apply', RV2.id)); await ok('PRE: принят', C2.call('decide', rv2a.id, 'accepted')); await ok('PRE: завершена', C2.call('completeShift', RV2.id));
+  const rv = (criteria) => W3.call('submitReview', { shift_id: RV2.id, to_user: C2.id, stars: 5, criteria, text: 'ок' });
+  await no('PRE: HTML в критерии отзыва', rv({ 'Условия': '<img src=x onerror=alert(1)>' }), 'invalid');
+  await no('PRE: оценка 6 в критерии', rv({ 'Условия': 6 }), 'invalid');
+  await no('PRE: слишком много критериев', rv(Object.fromEntries(Array.from({ length: 9 }, (_, i) => ['k' + i, 5]))), 'invalid');
+  await ok('PRE: нормальные критерии', rv({ 'Условия': 4, 'Организация': 5 }));
+  // смены заблокированного пользователя скрыты, после разблокировки возвращаются
+  const BC = await login(7302, 'Нарушитель'); await ok('PRE: профиль подрядчика', BC.call('saveContractor', { ...cp, name: 'Нарушитель' }));
+  const BS = await ok('PRE: смена нарушителя', BC.call('createShift', { ...sp, title: 'Смена нарушителя', date: day(16) }, key()));
+  await ok('PRE: смена в ленте', W3.call('feed', { limit: 200 }), (b) => b.items.some((x) => x.id === BS.id));
+  await ok('PRE: блокировка', A.call('adminBlock', BC.id, true));
+  await ok('PRE: смена заблокированного исчезла из ленты', W3.call('feed', { limit: 200 }), (b) => !b.items.some((x) => x.id === BS.id));
+  await no('PRE: откликнуться на смену заблокированного нельзя', W3.call('apply', BS.id), 'closed');
+  await ok('PRE: разблокировка', A.call('adminBlock', BC.id, false));
+  await ok('PRE: смена вернулась в ленту', W3.call('feed', { limit: 200 }), (b) => b.items.some((x) => x.id === BS.id));
+  // права админа — только у тех, кто сейчас в ADMIN_TG_IDS
+  const EX = await login(7303, 'Бывший админ');
+  await db.query('update users set is_admin = true where id = $1', [EX.id]);
+  await ok('PRE: пока флаг стоит — админ', EX.call('adminStats'));
+  const EX2 = await login(7303, 'Бывший админ');
+  await no('PRE: не в ADMIN_TG_IDS — после входа прав админа нет', EX2.call('adminStats'), 'forbidden');
+  await ok('PRE: админ из списка остаётся админом', (await login(1, 'Админ')).call('adminStats'));
+  // журнал событий: не больше 1000 в час на пользователя
+  await db.query("insert into events(user_id, event) select $1, 'bulk' from generate_series(1, 1000)", [PL.id]);
+  await ok('PRE: событие сверх часового лимита', PL.call('track', 'pre_after_cap', {}));
+  check('PRE: сверх лимита событие не записано', (await db.query("select count(*)::int as n from events where event = 'pre_after_cap'")).rows[0].n === 0);
+  // чат: догрузка — не больше 500 сообщений за раз
+  await db.query("insert into messages(scope, user_id, text) select 'shift:' || $1::text, $2::bigint, 'bulk' || g from generate_series(1, 600) g", [S1.id, W1.id]);
+  const firstMsg = (await db.query("select min(id)::text as id from messages where scope = 'shift:' || $1::text", [S1.id])).rows[0].id;
+  await ok('PRE: догрузка чата ограничена 500 сообщениями', W1.call('messages', 'shift:' + S1.id, firstMsg), (b) => b.length === 500 && b[0].id > Number(firstMsg));
+  // CSP: разрешена только библиотека карты нужной версии, а не весь cdn.jsdelivr.net
+  const csp = page.headers.get('content-security-policy') || '';
+  const scriptSrc = (csp.split(';').find((d) => d.trim().startsWith('script-src')) || '').trim().split(/\s+/);
+  const mapUrl = (fs.readFileSync(new URL('../../js/maps.js', import.meta.url), 'utf8').match(/const MAPLIBRE = '([^']+)'/) || [])[1] || '';
+  check('PRE: CSP не открывает весь cdn.jsdelivr.net', !scriptSrc.includes('https://cdn.jsdelivr.net'), csp);
+  check('PRE: адрес карты из js/maps.js разрешён CSP', scriptSrc.some((src) => src.endsWith('/') && mapUrl.startsWith(src)), mapUrl + ' / ' + csp);
+
+  // ===== чат сразу после отклика, архив после отказа =====
+  const CH = await ok('CHAT2: смена', C2.call('createShift', { ...sp, title: 'Смена с чатом', date: day(17), people: 2 }, key()));
+  const cha = await ok('CHAT2: W3 откликается', W3.call('apply', CH.id), (b) => b.status === 'pending');
+  await ok('CHAT2: чат у исполнителя появился сразу, без сообщений, «в ожидании»', W3.call('myDialogs', 'worker'),
+    (b) => b.some((d) => d.app_id === cha.id && d.last === null && d.archived === false && d.info.application.status === 'pending'));
+  await ok('CHAT2: и у подрядчика', C2.call('myDialogs', 'contractor'), (b) => b.some((d) => d.app_id === cha.id && d.archived === false));
+  await ok('CHAT2: исполнитель пишет до решения подрядчика', W3.call('sendMessage', 'dm:' + cha.id, 'Какая форма одежды?', key()));
+  await ok('CHAT2: отзыв отклика с перепиской — отклик не удаляется, чат в архиве', W3.call('withdraw', cha.id), (b) => b.status === 'cancelled' && b.archived === true);
+  await ok('CHAT2: в списке чатов — архив', W3.call('myDialogs', 'worker'), (b) => b.some((d) => d.app_id === cha.id && d.archived === true && d.last.text === 'Какая форма одежды?'));
+  await ok('CHAT2: переписка читается', C2.call('messages', 'dm:' + cha.id, 0), (b) => b.length === 1);
+  await no('CHAT2: в архивный чат писать нельзя (исполнитель)', W3.call('sendMessage', 'dm:' + cha.id, 'ещё', key()), 'closed');
+  await no('CHAT2: и подрядчик тоже', C2.call('sendMessage', 'dm:' + cha.id, 'ответ', key()), 'closed');
+  await no('CHAT2: посторонний не узнаёт, что чат в архиве', W1.call('sendMessage', 'dm:' + cha.id, 'x', key()), 'forbidden');
+  await ok('CHAT2: повторный отклик оживляет тот же чат', W3.call('apply', CH.id), (b) => b.id === cha.id && b.status === 'pending' && !b.duplicate);
+  await ok('CHAT2: чат снова активный', W3.call('myDialogs', 'worker'), (b) => b.some((d) => d.app_id === cha.id && d.archived === false));
+  await ok('CHAT2: и в него снова можно писать', W3.call('sendMessage', 'dm:' + cha.id, 'Я снова тут', key()));
+  await ok('CHAT2: подрядчик отклоняет', C2.call('decide', cha.id, 'rejected'));
+  await ok('CHAT2: после отклонения — архив', C2.call('myDialogs', 'contractor'), (b) => b.some((d) => d.app_id === cha.id && d.archived === true));
+  await no('CHAT2: после отклонения писать нельзя', W3.call('sendMessage', 'dm:' + cha.id, 'почему?', key()), 'closed');
+  await ok('CHAT2: отклонённый отклик повторно не подать', W3.call('apply', CH.id), (b) => b.duplicate === true && b.status === 'rejected');
+  const CH2 = await ok('CHAT2: смена 2', C2.call('createShift', { ...sp, title: 'Смена для отмены отклика', date: day(17) }, key()));
+  const chb = await ok('CHAT2: свайп-отклик', W3.call('apply', CH2.id)); await ok('CHAT2: сообщение', W3.call('sendMessage', 'dm:' + chb.id, 'вопрос', key()));
+  await ok('CHAT2: «вернуть» свайп при переписке — чат в архиве, не удаляется', W3.call('undoApply', CH2.id), (b) => b === true);
+  await ok('CHAT2: отклик сохранился отменённым', W3.call('myApplications'), (b) => b.some((a) => a.id === chb.id && a.status === 'cancelled' && a.withdrawn === true));
+  const chc = await ok('CHAT2: принятый исполнитель', W2.call('apply', CH2.id)); await ok('CHAT2: принят', C2.call('decide', chc.id, 'accepted'));
+  await ok('CHAT2: принятый отказывается от смены', W2.call('withdraw', chc.id), (b) => b.status === 'cancelled');
+  await ok('CHAT2: чат принятого — в архиве (без сообщений не показывается)', W2.call('myDialogs', 'worker'), (b) => !b.some((d) => d.app_id === chc.id && !d.archived));
+
+  // ===== служба поддержки =====
+  await ok('SUP: конфиг — поддержка и коды включены', fetch(BASE + '/config').then(async (r) => ({ status: r.status, body: await r.json() })), (b) => b.support === true && b.phone_code === 'smsru');
+  const sup1 = await ok('SUP: пользователь пишет в поддержку', W1.call('sendMessage', 'support:' + W1.id, 'Не приходят уведомления', key()), (b) => b.role === 'user' && b.name === 'Пётр');
+  check('SUP: обращение ждёт пересылки сотруднику в Telegram', (await db.query('select support_fwd from messages where id = $1', [sup1.id])).rows[0].support_fwd === false);
+  await no('SUP: чужой чат поддержки не читается', W2.call('messages', 'support:' + W1.id, 0), 'forbidden');
+  await no('SUP: и не пишется', W2.call('sendMessage', 'support:' + W1.id, 'x', key()), 'forbidden');
+  await no('SUP: список обращений — только поддержке', W1.call('supportInbox'), 'forbidden');
+  const AG = await login(AGENT_TG, 'Серёга');
+  await ok('SUP: сотрудник поддержки по SUPPORT_TG_IDS', AG.call('me'), (b) => b.is_support === true && b.is_admin === false);
+  await ok('SUP: обращение в списке, ждёт ответа', AG.call('supportInbox'), (b) => b.some((x) => x.user_id === W1.id && x.waiting === true && x.last.text === 'Не приходят уведомления'));
+  await ok('SUP: сотрудник читает обращение', AG.call('messages', 'support:' + W1.id, 0), (b) => b.length === 1);
+  await ok('SUP: сотрудник отвечает в приложении', AG.call('sendMessage', 'support:' + W1.id, 'Проверьте, что бот не заблокирован', key()), (b) => b.role === 'support' && b.name === 'Поддержка SPEED HELPER');
+  await ok('SUP: пользователь получил уведомление', W1.call('notifications'), (b) => b.some((n) => n.type === 'support' && n.link === '#/support' && /Проверьте, что бот/.test(n.text)));
+  await ok('SUP: уведомление видно в обоих режимах', W1.call('notifications', 'contractor'), (b) => b.some((n) => n.type === 'support'));
+  await ok('SUP: обращение отвечено', AG.call('supportInbox'), (b) => b.find((x) => x.user_id === W1.id).waiting === false);
+  check('SUP: ответ из Telegram (бот)', (await db.query('select bot_support_reply($1, $2, $3, $4) as r', [AGENT_TG, 'Серёга', W1.id, 'Ответ из Telegram'])).rows[0].r === 'ok');
+  check('SUP: ответ несуществующему пользователю', (await db.query('select bot_support_reply($1, $2, $3, $4) as r', [AGENT_TG, 'Серёга', 999999, 'x'])).rows[0].r === 'no_user');
+  await ok('SUP: пользователь видит оба ответа', W1.call('messages', 'support:' + W1.id, 0), (b) => b.length === 3 && b.filter((m) => m.role === 'support').length === 2);
+  await db.query("insert into messages(scope, user_id, text, support_fwd) select 'support:' || $1::text, $1::bigint, 'spam' || g, true from generate_series(1, 30) g", [W2.id]);
+  await no('SUP: не больше 30 сообщений в поддержку в час', W2.call('sendMessage', 'support:' + W2.id, 'ещё одно', key()), 'limit');
+  const EXS = await login(AGENT_TG, 'Серёга'); check('SUP: повторный вход сотрудника — права на месте', (await EXS.call('me')).body.is_support === true);
+
+  // ===== подтверждение номера кодом =====
+  const PH = await login(7401, 'Телефон', true), PH2 = await login(7402, 'Телефон2', true);
+  await no('PHONE2: не мобильный номер', PH.call('phoneSendCode', '+7 (495) 123-45-67'), 'invalid');
+  await no('PHONE2: мусор вместо номера', PH.call('phoneSendCode', 'abc'), 'invalid');
+  await ok('PHONE2: код отправлен', PH.call('phoneSendCode', '+7 (916) 555-44-33'), (b) => b.sent === true && b.phone === '9165554433' && b.resend_in === 60);
+  check('PHONE2: код дошёл до провайдера', /^\d{6}$/.test(smsCodes['79165554433'] || ''), JSON.stringify(smsCodes));
+  check('PHONE2: в базе только хеш, не код', (await db.query("select count(*)::int as n from phone_codes where code_hash = $1 or salt like '%' || $1 || '%'", [smsCodes['79165554433']])).rows[0].n === 0);
+  await no('PHONE2: повторный код раньше чем через минуту', PH.call('phoneSendCode', '9165554433'), 'rate');
+  const wrong = smsCodes['79165554433'] === '111111' ? '222222' : '111111';
+  await ok('PHONE2: неверный код — понятный ответ и счётчик попыток', PH.call('phoneVerifyCode', wrong), (b) => b.ok === false && b.left === 4);
+  await ok('PHONE2: верный код — номер подтверждён', PH.call('phoneVerifyCode', smsCodes['79165554433']), (b) => b.ok === true);
+  await ok('PHONE2: статус в профиле', PH.call('me'), (b) => b.phone_verified === true && b.phone_number === '9165554433');
+  await no('PHONE2: код одноразовый', PH.call('phoneVerifyCode', smsCodes['79165554433']), 'expired');
+  await no('PHONE2: номер другого аккаунта занят', PH2.call('phoneSendCode', '89165554433'), 'taken');
+  await ok('PHONE2: профиль исполнителя с пустым телефоном', PH2.call('saveWorker', { ...wp, name: 'Телефон Два', phone: '' }));
+  await ok('PHONE2: код второму', PH2.call('phoneSendCode', '9165550000'));
+  for (let i = 0; i < 5; i++) await PH2.call('phoneVerifyCode', smsCodes['79165550000'] === '333333' ? '444444' : '333333');
+  await no('PHONE2: после 5 неверных попыток код сгорает', PH2.call('phoneVerifyCode', smsCodes['79165550000']), 'expired');
+  await db.query("update phone_codes set created_at = now() - interval '2 minutes' where user_id = $1", [PH2.id]);
+  await ok('PHONE2: новый код', PH2.call('phoneSendCode', '9165550000'));
+  await ok('PHONE2: подтверждение', PH2.call('phoneVerifyCode', smsCodes['79165550000']), (b) => b.ok === true);
+  await ok('PHONE2: пустой телефон в анкете заполнился и помечен подтверждённым', PH2.call('me'), (b) => b.worker.phone === '+79165550000' && b.worker.phone_ok === true);
+  const PH3 = await login(7403, 'Телефон3', true);
+  const sf = await PH3.call('phoneSendCode', '9990000000');
+  check('PHONE2: сбой провайдера — понятная ошибка, не 500', sf.status === 502 && sf.body.hint === 'send_failed', JSON.stringify(sf));
+  await no('PHONE2: код после сбоя отправки не действует', PH3.call('phoneVerifyCode', '123456'), 'expired');
+  await ok('PHONE2: удаление аккаунта стирает коды', PH.call('deleteAccount'));
+  check('PHONE2: кодов удалённого нет', (await db.query('select count(*)::int as n from phone_codes where user_id = $1', [PH.id])).rows[0].n === 0);
+
+  // ===== переезд на новый бот: приложение, открытое из прежнего бота, пускает в тот же аккаунт =====
+  const authWith = async (token) => { const r = await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id: 6101, first_name: 'Исп1' }, token) }) }); return { status: r.status, body: await r.json() }; };
+  await ok('BOT: вход из прежнего бота (TG_BOT_TOKEN_OLD) — тот же аккаунт', authWith('654321:OLD_TEST'), (b) => b.user_id === W1.id);
+  await no('BOT: подпись чужого бота не принимается', authWith('999:SOMEONE_ELSE'));
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

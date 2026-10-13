@@ -3,14 +3,16 @@
 # Если в server/.env задан BACKUP_REMOTE (например user@host:/backups/speedhelper), копия дополнительно отправляется туда по rsync/ssh.
 # Ручной запуск: speedhelper-backup
 set -euo pipefail
+umask 077   # в копии — персональные данные: файлы читает только root
 DIR=/var/backups/speedhelper
 ENV=/opt/speedhelper/server/.env
 FILE="$DIR/db-$(date +%F).dump"
-mkdir -p "$DIR"; chown postgres "$DIR"
+mkdir -p "$DIR"; chown postgres "$DIR"; chmod 700 "$DIR"
 
 sudo -u postgres pg_dump -Fc speedhelper > "$FILE.tmp"
 # проверка, что копия читается (иначе бэкап бесполезен)
-if ! sudo -u postgres pg_restore --list "$FILE.tmp" >/dev/null 2>&1; then
+# файл открывает root и передаёт на вход: сам postgres прочитать его не может (права 600)
+if ! sudo -u postgres pg_restore --list < "$FILE.tmp" >/dev/null 2>&1; then
   rm -f "$FILE.tmp"; echo "$(date -Is) ОШИБКА: копия БД повреждена" >&2
   exit 1
 fi

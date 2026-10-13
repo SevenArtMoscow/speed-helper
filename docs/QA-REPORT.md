@@ -60,6 +60,6 @@
 
 ## Как выкатить исправления
 ```bash
-speedhelper-backup && G="git -c safe.directory=/opt/speedhelper -C /opt/speedhelper"; $G fetch -q origin main && $G reset -q --hard origin/main && chown -R speedhelper:speedhelper /opt/speedhelper && (cd /opt/speedhelper/server && npm ci --omit=dev --silent) && systemctl restart speedhelper && sleep 4 && curl -s https://speedhelper.ru/api/health
+speedhelper-backup && G="git -c safe.directory=/opt/speedhelper -C /opt/speedhelper"; $G fetch -q origin main && $G reset -q --hard origin/main && (cd /opt/speedhelper/server && npm ci --omit=dev --ignore-scripts --silent) && systemctl restart speedhelper && sleep 4 && curl -s https://speedhelper.ru/api/health
 ```
 Миграция 008 применится сама при запуске (только заменяет функции, данные не трогает).

@@ -11,6 +11,7 @@ export async function migrate(pool, dirs) {
     const c = await pool.connect();
     try {
       await c.query('begin');
+      await c.query('set local statement_timeout = 0');   // миграция (индексы, перерасчёт) может идти дольше обычного лимита запроса
       await c.query(fs.readFileSync(file, 'utf8'));
       await c.query('insert into schema_migrations(name) values ($1)', [name]);
       await c.query('commit');

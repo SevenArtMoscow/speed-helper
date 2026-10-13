@@ -2,6 +2,7 @@
 # Установка и обновление SPEED HELPER на Ubuntu 22.04/24.04 (Timeweb Cloud). Запуск от root:
 #   curl -fsSL https://raw.githubusercontent.com/SevenArtMoscow/speed-helper/main/deploy/setup.sh -o setup.sh && TG_BOT_TOKEN=<токен> ADMIN_TG_IDS=<id,id> bash setup.sh
 # Повторный запуск безопасен: обновляет код, настройки сервера и nginx, перезапускает сервис; данные и server/.env не трогает.
+# Вход по SSH только по ключу (пароль отключается, если у root уже есть ключ): SSH_KEYS_ONLY=1 bash setup.sh
 set -euo pipefail
 
 DOMAIN="${DOMAIN:-speedhelper.ru}"
@@ -26,15 +27,14 @@ id speedhelper >/dev/null 2>&1 || useradd --system --home "$DIR" --shell /usr/sb
 if [ -d "$DIR/.git" ]; then git -c safe.directory="$DIR" -C "$DIR" fetch -q origin "$BRANCH"; git -c safe.directory="$DIR" -C "$DIR" reset -q --hard "origin/$BRANCH"
 else git clone -q -b "$BRANCH" "$REPO" "$DIR"; fi
 echo "    версия: $(git -c safe.directory="$DIR" -C "$DIR" log --oneline -1)"
-(cd "$DIR/server" && (npm ci --omit=dev --silent 2>/dev/null || npm install --omit=dev --silent))
+# --ignore-scripts: установка зависимостей от root не выполняет чужие скрипты из пакетов
+(cd "$DIR/server" && (npm ci --omit=dev --ignore-scripts --silent 2>/dev/null || npm install --omit=dev --ignore-scripts --silent))
 
 echo "==> Настройки (server/.env)"
 if [ ! -f "$ENV" ]; then
   DBPASS="$(openssl rand -hex 16)"
   sudo -u postgres psql -qc "create role speedhelper login password '$DBPASS'" 2>/dev/null || sudo -u postgres psql -qc "alter role speedhelper password '$DBPASS'"
   sudo -u postgres psql -qc "create database speedhelper owner speedhelper" 2>/dev/null || true
-  # миграции создают роли anon/authenticated (совместимость с Supabase)
-  sudo -u postgres psql -qc "alter role speedhelper createrole"
   cat > "$ENV" <<EOF
 PORT=3000
 DATABASE_URL=postgres://speedhelper:$DBPASS@127.0.0.1:5432/speedhelper
@@ -50,7 +50,24 @@ add_env OPERATOR_NAME ""     # оператор персональных дан�
 add_env OPERATOR_CONTACT ""  # контакт для обращений по данным (e-mail или @username)
 add_env SUPPORT_URL ""       # ссылка на поддержку, например https://t.me/ваш_аккаунт
 add_env BACKUP_REMOTE ""     # куда копировать бэкапы БД (rsync), например user@host:/backups/speedhelper
-chmod 600 "$ENV"; chown -R speedhelper:speedhelper "$DIR"
+add_env SUPPORT_TG_IDS ""    # Telegram ID сотрудников поддержки через запятую — им бот пересылает обращения из приложения
+add_env SMS_PROVIDER ""      # подтверждение номера кодом: smsru (+ SMSRU_API_ID) или tg_gateway (+ TG_GATEWAY_TOKEN); пусто — только через бота
+# Код принадлежит root и только читается сервисом: взломав приложение, нельзя подменить его код и закрепиться.
+# Секреты (.env) читает только группа speedhelper; писать сервис может лишь в /var/lib/speedhelper (StateDirectory).
+chown -R root:root "$DIR"; chown root:speedhelper "$ENV"; chmod 640 "$ENV"
+install -d -o speedhelper -g speedhelper -m 700 /var/lib/speedhelper
+if [ -f "$DIR/server/.welcome-file-id" ]; then mv -f "$DIR/server/.welcome-file-id" /var/lib/speedhelper/welcome-file-id; chown speedhelper:speedhelper /var/lib/speedhelper/welcome-file-id; fi
+
+echo "==> База: роль приложения без лишних прав"
+# роли anon/authenticated нужны миграциям (совместимость с Supabase) — создаёт их postgres, а у роли приложения права CREATEROLE нет
+# (с ним через уязвимость в приложении можно было бы выдать себе системные роли PostgreSQL)
+sudo -u postgres psql -q <<'SQL'
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+end $$;
+alter role speedhelper nocreaterole nocreatedb;
+SQL
 
 echo "==> Своп и сеть"
 if [ "$(swapon --show --noheadings | wc -l)" -eq 0 ]; then
@@ -65,6 +82,7 @@ MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
 SB=$(( MEM_MB / 4 )); [ "$SB" -gt 2048 ] && SB=2048; [ "$SB" -lt 128 ] && SB=128
 PGCONF="/etc/postgresql/$PGV/main/conf.d/speedhelper.conf"; mkdir -p "$(dirname "$PGCONF")"
 cat > "$PGCONF.new" <<EOF
+listen_addresses = 'localhost'
 shared_buffers = ${SB}MB
 effective_cache_size = $(( MEM_MB / 2 ))MB
 work_mem = 8MB
@@ -86,12 +104,24 @@ EOF
 systemctl enable -q --now fail2ban && systemctl restart fail2ban
 printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades
 mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nSystemMaxUse=500M\nMaxRetentionSec=1month\n' > /etc/systemd/journald.conf.d/speedhelper.conf && systemctl restart systemd-journald
+# SSH: по паролю — только пока нет ключа (иначе можно потерять доступ); с SSH_KEYS_ONLY=1 и ключом у root — только по ключу
+if [ "${SSH_KEYS_ONLY:-0}" = 1 ]; then
+  if [ -s /root/.ssh/authorized_keys ]; then
+    printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/10-speedhelper.conf
+    if sshd -t; then systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true; echo "    SSH: вход только по ключу"
+    else rm -f /etc/ssh/sshd_config.d/10-speedhelper.conf; echo "!! sshd не принял настройку — оставлено как было"; fi
+  else echo "!! SSH_KEYS_ONLY=1, но у root нет ключей (/root/.ssh/authorized_keys) — вход по паролю оставлен, чтобы не потерять доступ"; fi
+elif sshd -T 2>/dev/null | grep -qi '^passwordauthentication yes'; then
+  echo "!! SSH пускает по паролю. Добавьте свой ключ в /root/.ssh/authorized_keys и запустите установку с SSH_KEYS_ONLY=1"
+fi
 
 echo "==> Резервные копии БД, мониторинг"
 install -m 755 "$DIR/deploy/backup.sh" /usr/local/bin/speedhelper-backup
 install -m 755 "$DIR/deploy/healthcheck.sh" /usr/local/bin/speedhelper-health
 install -m 755 "$DIR/deploy/restore.sh" /usr/local/bin/speedhelper-restore
-mkdir -p /var/backups/speedhelper && chown postgres /var/backups/speedhelper
+# в копиях БД персональные данные (телефоны): папка и файлы — только для владельца
+mkdir -p /var/backups/speedhelper && chown postgres /var/backups/speedhelper && chmod 700 /var/backups/speedhelper
+chmod 600 /var/backups/speedhelper/*.dump 2>/dev/null || true
 rm -f /etc/cron.d/speedhelper-backup
 printf '30 3 * * * root /usr/local/bin/speedhelper-backup >> /var/log/speedhelper-backup.log 2>&1\n' > /etc/cron.d/speedhelper-backup
 printf '* * * * * root /usr/local/bin/speedhelper-health >> /var/log/speedhelper-health.log 2>&1\n' > /etc/cron.d/speedhelper-health
@@ -112,13 +142,28 @@ Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--max-old-space-size=1536
+Environment=WELCOME_ID_FILE=/var/lib/speedhelper/welcome-file-id
 LimitNOFILE=65535
 MemoryMax=3G
+# изоляция: вся система только для чтения, своя /tmp, писать можно лишь в /var/lib/speedhelper
+StateDirectory=speedhelper
+UMask=0077
 NoNewPrivileges=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
 ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 CapabilityBoundingSet=
 
@@ -132,8 +177,28 @@ echo "==> nginx"
 cat > /etc/nginx/conf.d/speedhelper.conf <<'EOF'
 # общие настройки SPEED HELPER (создаёт deploy/setup.sh)
 server_tokens off;
-limit_req_zone $binary_remote_addr zone=speedhelper_api:10m rate=30r/s;
+# лимиты на один IP-адрес. Щедрые: у мобильных операторов за одним адресом бывают сотни абонентов,
+# а точные лимиты на каждого пользователя считает само приложение
+limit_req_zone $binary_remote_addr zone=speedhelper_api:10m rate=50r/s;
+limit_req_zone $binary_remote_addr zone=speedhelper_static:10m rate=50r/s;
+limit_req_zone $binary_remote_addr zone=speedhelper_health:1m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=speedhelper_conn:10m;
 EOF
+# общие настройки сайта: лимиты, тайм-ауты против «медленных» атак (slowloris), размер запроса (фото профиля — до ~100 КБ)
+LIMITS='  client_max_body_size 512k;
+  client_body_timeout 15s;
+  client_header_timeout 15s;
+  send_timeout 30s;
+  keepalive_timeout 30s;
+  limit_conn speedhelper_conn 100;
+  limit_req_status 429;
+  limit_conn_status 429;'
+LOC_HEALTH='  location = /api/health {
+    limit_req zone=speedhelper_health burst=5 nodelay;'
+LOC_API='  location /api/ {
+    limit_req zone=speedhelper_api burst=150 nodelay;'
+LOC_STATIC='  location / {
+    limit_req zone=speedhelper_static burst=200 nodelay;'
 PROXY='    proxy_pass http://127.0.0.1:3000;
     proxy_http_version 1.1;
     proxy_set_header Connection "";
@@ -177,14 +242,15 @@ server {
   ssl_certificate_key $CERT/privkey.pem;
 $SSLINC
   add_header Strict-Transport-Security "max-age=31536000" always;
-  client_max_body_size 4m;
+$LIMITS
 $GZIP
-  location /api/ {
-    limit_req zone=speedhelper_api burst=60 nodelay;
-    limit_req_status 429;
+$LOC_HEALTH
 $PROXY
   }
-  location / {
+$LOC_API
+$PROXY
+  }
+$LOC_STATIC
 $PROXY
   }
 }
@@ -195,9 +261,15 @@ server {
   listen 80;
   listen [::]:80;
   server_name $DOMAIN www.$DOMAIN;
-  client_max_body_size 4m;
+$LIMITS
 $GZIP
-  location / {
+$LOC_HEALTH
+$PROXY
+  }
+$LOC_API
+$PROXY
+  }
+$LOC_STATIC
 $PROXY
   }
 }

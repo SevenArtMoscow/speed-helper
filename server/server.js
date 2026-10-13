@@ -13,6 +13,7 @@ import pg from 'pg';
 import { loadEnv } from './env.js';
 import { migrate } from './migrate.js';
 import { startBot } from './bot.js';
+import { smsProvider } from './sms.js';
 import os from 'node:os';
 import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first'); // у сервера нерабочий IPv6-маршрут до Telegram: без этого бот периодически теряет связь («fetch failed»)
@@ -23,6 +24,9 @@ const env = process.env;
 for (const k of ['DATABASE_URL', 'TG_BOT_TOKEN', 'JWT_SECRET']) if (!env[k]) { console.error(`Не задана переменная ${k}`); process.exit(1); }
 const PORT = Number(env.PORT || 3000);
 const ADMINS = (env.ADMIN_TG_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+// служба поддержки: Telegram ID сотрудников; им бот пересылает обращения, в приложении у них есть список обращений
+const SUPPORT = (env.SUPPORT_TG_IDS || '').split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+const SMS = smsProvider(env);   // доставка кодов подтверждения номера (sms.js); null — подтверждение только через Telegram
 const VERSION = (() => { try { return fs.readFileSync(path.join(ROOT, '.git', 'HEAD'), 'utf8').startsWith('ref:') ? fs.readFileSync(path.join(ROOT, '.git', fs.readFileSync(path.join(ROOT, '.git', 'HEAD'), 'utf8').slice(5).trim()), 'utf8').slice(0, 7) : 'dev'; } catch { return 'dev'; } })();
 
 // ---------- ограничение частоты запросов (скользящее окно, в памяти процесса) ----------
@@ -37,13 +41,22 @@ function limited(key, max, windowMs) {
 setInterval(() => { const t = Date.now() - 3600e3; for (const [k, a] of hits) if (!a.length || a[a.length - 1] < t) hits.delete(k); }, 60e3).unref();
 // запросы за nginx: реальный адрес приходит в X-Real-IP (порт 3000 наружу закрыт и слушает только 127.0.0.1)
 const clientIp = (req) => String(req.headers['x-real-ip'] || req.socket.remoteAddress || '');
-// дополнительные лимиты на «дорогие» и спам-опасные методы: [запросов, окно в мс]
-const FN_LIMITS = { sendMessage: [40, 60e3], createShift: [15, 3600e3], apply: [150, 3600e3], report: [10, 3600e3], saveWorker: [30, 3600e3], saveContractor: [30, 3600e3], logError: [30, 60e3], track: [120, 60e3], searchContractors: [60, 60e3], deleteAccount: [3, 3600e3] };
-const BIG_BODY = new Set(['saveWorker', 'saveContractor']);   // только они несут фото (до 400 КБ)
+// дополнительные лимиты на «дорогие» и спам-опасные методы: [[запросов, окно в мс], …]
+const FN_LIMITS = {
+  sendMessage: [[40, 60e3], [600, 3600e3]], createShift: [[15, 3600e3]], apply: [[150, 3600e3]], report: [[10, 3600e3]], saveWorker: [[30, 3600e3]], saveContractor: [[30, 3600e3]],
+  logError: [[30, 60e3]], track: [[120, 60e3]], searchContractors: [[60, 60e3]], deleteAccount: [[3, 3600e3]], toggleFav: [[60, 60e3], [300, 3600e3]], toggleShiftFav: [[60, 60e3]],
+  // тяжёлые выборки: защищают базу от «долбёжки» одним аккаунтом
+  phoneSendCode: [[3, 60e3], [10, 3600e3]], phoneVerifyCode: [[10, 60e3], [30, 3600e3]], supportInbox: [[60, 60e3]],
+  feed: [[120, 60e3]], leaderboard: [[20, 60e3]], contractorPage: [[90, 60e3]], workerPage: [[90, 60e3]], userReviews: [[60, 60e3]], myDialogs: [[60, 60e3]], teamChats: [[60, 60e3]],
+};
+const BIG_BODY = new Set(['saveWorker', 'saveContractor']);   // только они несут фото (до ~75 КБ в base64)
 const RATE_MSG = { message: 'Слишком много действий подряд — подождите минуту и повторите', hint: 'rate' };
+const BUSY_MSG = { message: 'Сервер сейчас перегружен — повторите через минуту', hint: 'server' };
 
-// «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера (параметр соединения)
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.PG_POOL_MAX || 10), options: `-c timezone=${(env.TZ_DB || 'Europe/Moscow').replace(/[^\w/+-]/g, '')}` });
+// «Сегодня/завтра» и проверка даты смены — по московскому времени, а не по UTC сервера (параметр соединения).
+// Один «тяжёлый» запрос не держит соединение дольше statement_timeout; при нехватке соединений запрос ждёт не больше 10 с, а не копится в очереди.
+const pgOpts = `-c timezone=${(env.TZ_DB || 'Europe/Moscow').replace(/[^\w/+-]/g, '')} -c statement_timeout=${Number(env.PG_STATEMENT_TIMEOUT_MS) || 15000} -c idle_in_transaction_session_timeout=30000`;
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.PG_POOL_MAX || 10), connectionTimeoutMillis: 10e3, options: pgOpts });
 pool.on('error', (e) => console.error('pg idle client error', e.message)); // обрыв соединения не роняет сервер
 
 // ---------- Telegram initData ----------
@@ -71,14 +84,17 @@ function verifyJwt(token) {
   if (!s) return null;
   const calc = crypto.createHmac('sha256', env.JWT_SECRET).update(`${h}.${b}`).digest('base64url');
   if (calc.length !== s.length || !crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(s))) return null;
-  const p = JSON.parse(Buffer.from(b, 'base64url').toString());
-  return p.exp > Date.now() / 1000 ? p : null;
+  let p; try { p = JSON.parse(Buffer.from(b, 'base64url').toString()); } catch { return null; }
+  return p && /^\d{1,18}$/.test(String(p.sub)) && p.exp > Date.now() / 1000 ? p : null;
 }
 
 // ---------- HTTP ----------
 const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'camera=(), microphone=(), payment=()', 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups' };
-// CSP: скрипты только свои, Telegram и CDN карты; карта (OpenFreeMap) и подсказки адресов (DaData) — по списку; встраивать приложение можно только в Telegram
-const CSP = ["default-src 'self'", "script-src 'self' https://telegram.org https://cdn.jsdelivr.net", "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net", "img-src 'self' data: blob: https://tiles.openfreemap.org",
+// CSP: скрипты только свои, Telegram и библиотека карты строго нужной версии (весь cdn.jsdelivr.net разрешать нельзя — там любой пакет из npm);
+// карта (OpenFreeMap) и подсказки адресов (DaData) — по списку; встраивать приложение можно только в Telegram.
+// MAPLIBRE_CDN должен совпадать с адресом в js/maps.js (это проверяет автотест).
+const MAPLIBRE_CDN = 'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/';
+const CSP = ["default-src 'self'", `script-src 'self' https://telegram.org ${MAPLIBRE_CDN}`, `style-src 'self' 'unsafe-inline' ${MAPLIBRE_CDN}`, "img-src 'self' data: blob: https://tiles.openfreemap.org",
   "font-src 'self' data:", "connect-src 'self' https://tiles.openfreemap.org https://suggestions.dadata.ru", "worker-src 'self' blob:", "child-src blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'",
   'frame-ancestors https://web.telegram.org https://*.telegram.org https://telegram.org'].join('; ');
 const json = (res, status, o) => { res.writeHead(status, { ...SEC, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
@@ -92,15 +108,20 @@ function readBody(req, limit = 64 * 1024) {
 }
 
 async function auth(req, res) {
-  if (limited('auth:' + clientIp(req), 40, 60e3)) return json(res, 429, RATE_MSG);
+  // с одного адреса бывает много людей (мобильные операторы выводят тысячи абонентов через один IP), поэтому лимит на адрес щедрый,
+  // а строгий — на конкретного пользователя Telegram (ниже, после проверки подписи)
+  if (limited('auth:' + clientIp(req), 300, 60e3)) return json(res, 429, RATE_MSG);
   const { initData } = await readBody(req, 16 * 1024);
-  const user = verifyInitData(String(initData || ''), env.TG_BOT_TOKEN);
-  if (!user?.id) return json(res, 401, { error: 'Неверные данные Telegram', code: 'unauthorized' });
-  // один Telegram-пользователь = один аккаунт (unique tg_id); владельцы из ADMIN_TG_IDS получают права админа
+  // на время переезда на новый бот приложение, открытое из прежнего бота (TG_BOT_TOKEN_OLD), тоже пускаем
+  const user = verifyInitData(String(initData || ''), env.TG_BOT_TOKEN) || (env.TG_BOT_TOKEN_OLD ? verifyInitData(String(initData || ''), env.TG_BOT_TOKEN_OLD) : null);
+  if (!user?.id || !Number.isSafeInteger(user.id)) return json(res, 401, { error: 'Неверные данные Telegram', code: 'unauthorized' });
+  if (limited('authtg:' + user.id, 30, 60e3)) return json(res, 429, RATE_MSG);
+  // один Telegram-пользователь = один аккаунт (unique tg_id); права админа и поддержки — ровно у тех, кто сейчас в ADMIN_TG_IDS / SUPPORT_TG_IDS
+  // (убрали человека из списка — при следующем входе он теряет права)
   const { rows: [u] } = await pool.query(
-    `insert into users(tg_id, first_name, username, is_admin) values ($1, $2, $3, $4)
-     on conflict (tg_id) do update set first_name = excluded.first_name, username = excluded.username, is_admin = users.is_admin or excluded.is_admin
-     returning id, blocked`, [user.id, user.first_name || null, user.username || null, ADMINS.includes(String(user.id))]);
+    `insert into users(tg_id, first_name, username, is_admin, is_support) values ($1, $2, $3, $4, $5)
+     on conflict (tg_id) do update set first_name = excluded.first_name, username = excluded.username, is_admin = excluded.is_admin, is_support = excluded.is_support
+     returning id, blocked`, [user.id, String(user.first_name || '').slice(0, 64) || null, String(user.username || '').slice(0, 64) || null, ADMINS.includes(String(user.id)), SUPPORT.includes(String(user.id))]);
   if (u.blocked) return json(res, 403, { error: 'Аккаунт заблокирован', code: 'blocked' });
   const exp = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
   json(res, 200, { access_token: signJwt({ sub: String(u.id), exp }), user_id: Number(u.id), expires_at: exp });
@@ -110,11 +131,13 @@ async function rpc(req, res) {
   const claims = verifyJwt((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
   if (!claims) return json(res, 401, { message: 'Сессия истекла, откройте приложение заново', hint: 'unauthorized' });
   if (limited('rpc:' + claims.sub, 400, 60e3)) return json(res, 429, RATE_MSG);
-  const { fn, args } = await readBody(req, 1024 * 1024);   // до 1 МБ только ради фото профиля; для остальных методов — до 64 КБ (ниже)
+  const { fn, args } = await readBody(req, 256 * 1024);   // до 256 КБ только ради фото профиля; для остальных методов — до 64 КБ (ниже)
   if (typeof fn !== 'string' || !/^[a-zA-Z]{1,40}$/.test(fn)) return json(res, 400, { message: 'Неизвестный метод', hint: 'invalid' });
   if (req.bodySize > 64 * 1024 && !BIG_BODY.has(fn)) return json(res, 413, { message: 'Слишком большой запрос', hint: 'invalid' });
-  const fl = FN_LIMITS[fn]; if (fl && limited(`fn:${fn}:${claims.sub}`, fl[0], fl[1])) return json(res, 429, RATE_MSG);
-  const c = await pool.connect();
+  if (Object.hasOwn(FN_LIMITS, fn) && FN_LIMITS[fn].some(([max, win]) => limited(`fn:${fn}:${win}:${claims.sub}`, max, win))) return json(res, 429, RATE_MSG);
+  if (fn === 'phoneSendCode') return await phoneSendCode(res, claims.sub, args);
+  let c;
+  try { c = await pool.connect(); } catch (e) { console.error('pg connect failed', fn, e.message); return json(res, 503, BUSY_MSG); }
   try {
     await c.query('begin');
     await c.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: claims.sub })]);
@@ -126,6 +149,8 @@ async function rpc(req, res) {
     // P0001 — raise exception из _fail(): текст для пользователя, код ошибки в hint
     if (e.code === 'P0001' && e.hint) return json(res, e.hint === 'unauthorized' || e.hint === 'blocked' ? 401 : 400, { message: e.message, hint: e.hint });
     if (e.code === '23505') return json(res, 409, { message: 'Уже сделано', hint: 'conflict' });
+    if (e.code === '23503') return json(res, 400, { message: 'Не найдено', hint: 'not_found' });   // ссылка на несуществующую запись
+    if (e.code === '57014') { console.error('rpc timeout', fn); return json(res, 503, BUSY_MSG); } // запрос дольше statement_timeout
     // 22xxx — неверный формат/длина значения, 23514 — нарушено ограничение (например, слишком длинный текст)
     if (/^22/.test(e.code || '') || e.code === '23514') return json(res, 400, { message: 'Некорректные данные: проверьте длину и формат полей', hint: 'invalid' });
     console.error('rpc failed', fn, e.message);
@@ -133,9 +158,31 @@ async function rpc(req, res) {
   } finally { c.release(); }
 }
 
+// Код подтверждения номера: генерирует сервер (криптостойкий), в базе только хеш с солью, сам код уходит провайдеру (sms.js) и пользователю.
+// Проверки номера и лимиты (раз в минуту, 5 в сутки на человека и на номер, общий потолок в час) — в phone_code_issue (миграция 021).
+async function phoneSendCode(res, me, args) {
+  if (!SMS) return json(res, 400, { message: 'Подтверждение по коду пока не подключено — подтвердите номер через Telegram', hint: 'unavailable' });
+  const code = String(crypto.randomInt(100000, 1000000)), salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.createHash('sha256').update(salt + code).digest('hex');
+  let issued;
+  try { issued = (await pool.query('select phone_code_issue($1, $2, $3, $4) as r', [me, String((Array.isArray(args) && args[0]) || ''), salt, hash])).rows[0].r; }
+  catch (e) {
+    if (e.code === 'P0001' && e.hint) return json(res, e.hint === 'unauthorized' ? 401 : 400, { message: e.message, hint: e.hint });
+    if (e.code === '57014' || /timeout/i.test(e.message)) return json(res, 503, BUSY_MSG);
+    throw e;
+  }
+  try { await SMS.send(issued.phone, code); }
+  catch (e) {
+    console.error('phone code send failed', SMS.name, e.message);
+    await pool.query('update phone_codes set used = true where user_id = $1 and code_hash = $2', [me, hash]).catch(() => {});
+    return json(res, 502, { message: 'Не удалось отправить код — попробуйте через минуту или подтвердите номер через Telegram', hint: 'send_failed' });
+  }
+  json(res, 200, { sent: true, phone: issued.phone, via: SMS.name, resend_in: 60, ttl: 600 });
+}
+
 // Статика: только файлы приложения (server/, supabase/, legacy/, .git — не раздаются)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
-const PUBLIC = /^\/(index\.html|manifest\.json|sw\.js|(css|js|icons|legal)\/[\w.\-]+)$/;
+const PUBLIC = /^\/(index\.html|manifest\.json|sw\.js|(css|js|icons|legal)\/\w[\w.\-]*)$/;   // имя файла не может начинаться с точки (.., .env)
 const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 function serveStatic(req, res) {
   let p; try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400, SEC); return res.end('Bad request'); }
@@ -154,11 +201,13 @@ function serveStatic(req, res) {
   });
 }
 
+let healthAt = 0;
 const server = http.createServer(async (req, res) => {
   try {
     const url = req.url.split('?')[0];
-    if (url === '/api/health') { await pool.query('select 1'); return json(res, 200, { ok: true }); }
-    if (url === '/api/config') return json(res, 200, { support_url: env.SUPPORT_URL || '', bot: (bot && bot.username) || env.BOT_USERNAME || '', prizes: env.PRIZES_TEXT || '', version: VERSION });
+    // проверка доступна и внешнему монитору; к базе ходим не чаще раза в 5 секунд, сколько бы запросов ни пришло
+    if (url === '/api/health') { if (Date.now() - healthAt > 5e3) { await pool.query('select 1'); healthAt = Date.now(); } return json(res, 200, { ok: true }); }
+    if (url === '/api/config') return json(res, 200, { support_url: env.SUPPORT_URL || '', support: SUPPORT.length > 0, phone_code: SMS ? SMS.name : '', bot: (bot && bot.username) || env.BOT_USERNAME || '', prizes: env.PRIZES_TEXT || '', version: VERSION });
     if (req.method === 'POST' && url === '/api/auth') return await auth(req, res);
     if (req.method === 'POST' && url === '/api/rpc') return await rpc(req, res);
     if (url.startsWith('/api/') && req.method !== 'POST' && req.method !== 'GET') return json(res, 405, { message: 'Method not allowed', hint: 'invalid' });
@@ -175,7 +224,7 @@ server.requestTimeout = 30e3; server.headersTimeout = 15e3; server.keepAliveTime
 
 await migrate(pool, [path.join(ROOT, 'server', 'migrations'), path.join(ROOT, 'supabase', 'migrations')]);
 server.listen(PORT, '127.0.0.1', () => console.log(`SPEED HELPER слушает 127.0.0.1:${PORT}`));
-const bot = env.DISABLE_BOT === '1' ? { alert: async () => {} } : startBot({ pool, token: env.TG_BOT_TOKEN, appUrl: env.APP_URL, admins: ADMINS });
+const bot = env.DISABLE_BOT === '1' ? { alert: async () => {} } : startBot({ pool, token: env.TG_BOT_TOKEN, appUrl: env.APP_URL, admins: ADMINS, support: SUPPORT, oldToken: env.TG_BOT_TOKEN_OLD || '' });
 
 // оповещения админам в Telegram; не чаще раза в 10 минут на один вид события (защита от лавины при перезапусках)
 const alertFile = (k) => path.join(os.tmpdir(), 'speedhelper-alert-' + k);
@@ -185,7 +234,16 @@ async function alertAdmins(kind, text) {
 if (env.NODE_ENV === 'production') alertAdmins('start', `🔄 SPEED HELPER запущен (версия ${VERSION})`);
 
 // очистка старых событий/ключей/уведомлений: через минуту после старта и раз в 6 часов
-const maintain = () => pool.query('select maintenance() as r').then((r) => console.log('обслуживание БД:', JSON.stringify(r.rows[0].r))).catch((e) => console.error('maintenance failed', e.message));
+// обслуживание может идти дольше обычного лимита запроса (statement_timeout) — снимаем его только для этой транзакции
+async function maintain() {
+  let c;
+  try {
+    c = await pool.connect();
+    await c.query('begin'); await c.query("set local statement_timeout = '10min'");
+    const r = await c.query('select maintenance() as r'); await c.query('commit');
+    console.log('обслуживание БД:', JSON.stringify(r.rows[0].r));
+  } catch (e) { if (c) await c.query('rollback').catch(() => {}); console.error('maintenance failed', e.message); } finally { if (c) c.release(); }
+}
 setTimeout(maintain, 60e3).unref(); setInterval(maintain, 6 * 3600e3).unref();
 
 // мягкая остановка (systemctl restart): дорабатываем текущие запросы

@@ -5,7 +5,7 @@ import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, prefs, toggle } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
 import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce } from './util.js';
-import { reportSheet, shiftName, openLegal } from './screens-common.js';
+import { reportSheet, shiftName, openLegal, openSupport, phoneSheet } from './screens-common.js';
 
 const FKEY = 'sh_filters_v1';
 const defFilters = () => ({ date: 'any', min_pay: 0, geo: 'any', categories: [] });
@@ -128,7 +128,7 @@ async function search(ctx) {
     if (card) { card.style.transition = 'transform .28s ease-out,opacity .28s'; card.style.transform = kind === 'save' ? 'translateY(-60vh) scale(.5)' : `translateX(${kind === 'like' ? 130 : -130}vw) rotate(${kind === 'like' ? 24 : -24}deg)`; card.style.opacity = 0; }
     queue.shift();
     try {
-      if (kind === 'like') { const r = await api.apply(s.id); hist = { kind, s, dup: !!r.duplicate }; toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('swipe_right', { id: s.id }); track('application_sent', { id: s.id }); }
+      if (kind === 'like') { const r = await api.apply(s.id); hist = { kind, s, dup: !!r.duplicate }; toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен — чат с подрядчиком уже в «Чатах»', 'ok'); track('swipe_right', { id: s.id }); track('application_sent', { id: s.id }); }
       else if (kind === 'save') { await api.toggleShiftFav(s.id); hist = { kind, s }; toast('Смена отложена — она в «Избранном»', 'ok'); track('shift_saved', { id: s.id }); }
       else { await api.skip(s.id); hist = { kind, s }; showSkips(skipCount + 1); track('swipe_left', { id: s.id }); }
     } catch (e) {
@@ -241,7 +241,7 @@ async function shiftPage(ctx, id) {
   }
   // в Telegram внешние ссылки открываем через openLink (иначе откроются внутри мини-приложения)
   ctx.acts.route = (el) => { if (tg) tg.openLink(el.href); else window.open(el.href, '_blank'); };
-  ctx.acts.apply = async () => { const r = await api.apply(id); toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('application_sent', { id }); shiftPage(ctx, id); };
+  ctx.acts.apply = async () => { const r = await api.apply(id); toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен — можно написать подрядчику', 'ok'); track('application_sent', { id }); shiftPage(ctx, id); };
   ctx.acts.dm = () => go('#/chat/' + s.my_application_id);
   // личный чат привязан к отклику: чтобы задать вопрос, откликаемся (отклик можно отозвать в «Моих сменах»)
   ctx.acts.ask = async () => {
@@ -279,7 +279,8 @@ async function mine(ctx) {
   ctx.acts.leave = async (el) => {
     const pending = (el.closest('[data-st]') || {}).dataset?.st === 'pending';
     if (!(await confirmBox(pending ? 'Отозвать отклик?' : 'Отказаться от смены?', { ok: pending ? 'Отозвать' : 'Отказаться', danger: true, sub: pending ? '' : 'Подрядчик получит уведомление, место освободится для других.' }))) return;
-    await api.withdraw(Number(el.dataset.app)); toast(pending ? 'Отклик отозван' : 'Вы отказались от смены', 'ok'); await load();
+    const r = await api.withdraw(Number(el.dataset.app));
+    toast(r.archived || !pending ? (pending ? 'Отклик отозван, чат перемещён в архив' : 'Вы отказались от смены, чат перемещён в архив') : 'Отклик отозван', 'ok'); await load();
   };
 }
 
@@ -358,7 +359,7 @@ export function profileBlock(w, own) {
       stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
     + (w.about ? `<div class="about">${esc(w.about)}</div>` : '') + infoRows(rows)
     + (skills.length ? sect('Навыки') + `<div class="row wrap gap">${skills.join('')}</div>` : '') + (feats.length ? sect('Особенности') + `<div class="row wrap gap">${feats.join('')}</div>` : '')
-    + (phone10(w.phone) ? `<button class="callbtn" data-act="call" data-phone="+7${phone10(w.phone)}" data-name="${esc(w.name || '')}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>Позвонить</small></button>` : '');
+    + (phone10(w.phone) ? `<button class="callbtn" data-act="call" data-phone="+7${phone10(w.phone)}" data-name="${esc(w.name || '')}">${ICON.phone}<span>${esc(fmtPhone(w.phone))}</span><small>${w.phone_ok ? '✓ подтверждён · ' : ''}Позвонить</small></button>` : '');
 }
 // что именно добавить в профиль: пункты с «+N%», по нажатию — сразу в редактирование
 const TODO = [['avatar', 'Добавьте фото', 10, (w) => !!w.avatar], ['experience', 'Расскажите об опыте', 10, (w) => !!w.experience], ['skills', 'Укажите навыки', 10, (w) => (w.skills || []).length > 0],
@@ -373,16 +374,23 @@ async function profile(ctx) {
   const u = await refreshMe(); const w = u.worker, ok = w.percent >= CONFIG.MIN_VERIFIED_PERCENT;
   const P = await api.workerPage(u.id).catch(() => null), R = await api.userReviews(u.id, 'worker', 0).catch(() => null);
   const active = P && (P.active || []).length ? sect('Активные задания') + P.active.map((a) => `<div class="card click row sp" data-act="openShift" data-id="${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="mut sm">${esc(dateLabel(a.date))} · ${esc(timeRange(a))}</div></div>›</div>`).join('') : '';
-  ctx.render(`${profileBlock(w, true)}
+  ctx.render(`${profileBlock(w, true)}${phoneStatus(u)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${todoList(w)}</div>
     ${proCard(u)}${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
+  ctx.poll = async () => { if (!u.phone_verified && S.user.phone_verified) profile(ctx); };   // подтвердили в боте — обновляем статус
 }
+// статус номера в своём профиле: подтверждён — номер и галочка; нет — кнопка подтверждения
+export const phoneStatus = (u, need = '') => (u.phone_verified
+  ? `<div class="okline">✓ Номер ${u.phone_number ? esc(fmtPhone(u.phone_number)) + ' ' : ''}подтверждён${need ? ' — ' + need : ''}</div>`
+  : `<button class="btn block" data-act="verifyPhone" style="margin-top:10px">${ICON.phone}Подтвердить номер телефона${need ? ', чтобы ' + need : ''}</button>`);
 // «Помощь и документы»: политика, соглашение, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
 export function helpBlock() {
   const link = (ic, t, act, extra = '') => `<div class="irow click" data-act="${act}" ${extra}><span class="ico">${ICON[ic]}</span><span class="k" style="color:var(--txt);font-size:15px">${t}</span><span class="v mut">›</span></div>`;
-  return `<div class="sect">Ощущения</div><div class="card"><div class="row sp"><span>Вибрация</span>${toggle(prefs.haptic, 'setHaptic')}</div><div class="row sp" style="margin-top:12px"><span>Звуки</span>${toggle(prefs.sound, 'setSound')}</div></div><div class="sect">Помощь и документы</div><div class="info">${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}${S.cfg && S.cfg.support_url ? link('chats', 'Написать в поддержку', 'support') : ''}</div>
+  return `<div class="sect">Уведомления</div><div class="card"><div class="row sp"><span>Звук</span>${toggle(prefs.sound, 'setSound')}</div><div class="row sp" style="margin-top:12px"><span>Вибрация</span>${toggle(prefs.haptic, 'setHaptic')}</div>
+    <p class="mut sm" style="margin:10px 0 0">Сигнал о новых уведомлениях и сообщениях, пока приложение открыто. Уведомления в Telegram настраиваются в самом Telegram.</p></div>
+    <div class="sect">Помощь и документы</div><div class="info">${S.user.is_support ? link('users', 'Обращения в поддержку', 'supportInbox') : ''}${S.cfg && (S.cfg.support || S.cfg.support_url) ? link('chats', 'Написать в поддержку', 'support') : ''}${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}</div>
     <button class="btn danger block" data-act="delAccount" style="margin-top:14px">Удалить аккаунт</button>`;
 }
 export function roleSwitch() {
@@ -401,12 +409,9 @@ export function bindCommonProfile(ctx, u) {
   ctx.acts.setHaptic = (el) => { el.classList.toggle('on'); prefs.set('haptic', el.classList.contains('on')); haptic('medium'); };
   ctx.acts.setSound = (el) => { el.classList.toggle('on'); prefs.set('sound', el.classList.contains('on')); tick('ok'); };
   ctx.acts.legal = (el) => openLegal(el.dataset.u);
-  ctx.acts.support = () => {
-    const url = S.cfg.support_url;
-    if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(url)) tg.openTelegramLink(url); // чат поддержки открывается внутри Telegram
-    else if (tg) tg.openLink(url);
-    else window.open(url, '_blank', 'noopener');
-  };
+  ctx.acts.support = () => openSupport();
+  ctx.acts.supportInbox = () => go('#/support-inbox');
+  ctx.acts.verifyPhone = () => phoneSheet(() => go(location.hash));
   ctx.acts.delAccount = async () => {
     if (!(await confirmBox('Удалить аккаунт?', { ok: 'Продолжить', danger: true, sub: 'Профиль, избранное и уведомления будут стёрты, активные смены и отклики отменены. Это нельзя отменить.' }))) return;
     if (!(await confirmBox('Точно удалить навсегда?', { ok: 'Да, удалить', danger: true, sub: 'Рейтинг и история смен будут потеряны.' }))) return;

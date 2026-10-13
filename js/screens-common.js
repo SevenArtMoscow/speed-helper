@@ -1,8 +1,8 @@
 // Общие экраны: приветствие, анкеты, уведомления, чаты, команда, отзывы
 import { api, track, getSession, tg } from './api.js';
 import { CONFIG } from './config.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark } from './ui.js';
-import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel, shortTime, dayLabel } from './util.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, toggle, setRole, refreshMe, mountStars, statusTag, phoneField, maskPhone, validate, clearError, reqMark, openBot, notifyFeel } from './ui.js';
+import { esc, resizeImage, timeAgo, hhmm, uid, dateLabel, plural, money, timeRange, payLabel, shortTime, dayLabel, fmtPhone } from './util.js';
 import { ICON, reviewCard, bindReviews } from './ui.js';
 
 const LICENSES = ['A', 'B', 'C', 'D', 'E'];
@@ -44,8 +44,8 @@ async function welcome(ctx) {
     <button class="btn pri block" data-act="worker" style="padding:16px">Найти смену</button>
     <div style="height:10px"></div>
     <button class="btn block" data-act="contractor" style="padding:16px">Я подрядчик</button>
-    ${S.user.is_admin ? '<div style="height:10px"></div><button class="btn block ghost" data-act="admin">Админ-панель</button>' : ''}</div>`);
-  ctx.acts.admin = () => go('#/admin');
+    ${S.user.is_admin ? '<div style="height:10px"></div><button class="btn block ghost" data-act="admin">Админ-панель</button>' : ''}${S.user.is_support ? '<div style="height:10px"></div><button class="btn block ghost" data-act="supportInbox">Обращения в поддержку</button>' : ''}</div>`);
+  ctx.acts.admin = () => go('#/admin'); ctx.acts.supportInbox = () => go('#/support-inbox');
   ctx.acts.worker = () => { setRole('worker'); track('role_selected', { role: 'worker' }); go(S.user.roles.includes('worker') ? '#/w/search' : '#/w/onboard'); };
   ctx.acts.contractor = () => { setRole('contractor'); track('role_selected', { role: 'contractor' }); go(S.user.roles.includes('contractor') ? '#/c/home' : '#/c/onboard'); };
 }
@@ -136,6 +136,7 @@ const NT = {
   shift_completed: ['Смена завершена — оцените', 'check', 'o'], shift_closed: ['Смена завершена', 'info', 'o'], message: ['Новое сообщение', 'chats', 'b'], review: ['Вам поставили оценку', 'fav', 'y'],
   removed: ['Вас исключили из команды', 'close', 'r'], role: ['Роль в чате', 'shield', 'y'], shift_updated: ['Смена изменена', 'edit', 'y'], member_left: ['Участник отказался', 'user', 'r'],
   shift_overdue: ['Пора завершить смену', 'clock', 'o'], pro: ['Подписка PRO', 'crown', 'y'], saved_gone: ['Отложенная смена', 'bookmark', 'y'], new_shift_from_fav: ['Новая смена у вашего подрядчика', 'bolt', 'g'],
+  support: ['Поддержка', 'chats', 'b'],
 };
 // тело уведомления без повторов заголовка: только «кто / какая смена» и что делать дальше
 const NBODY = (n) => {
@@ -156,7 +157,7 @@ const NBODY = (n) => {
     default: return t;
   }
 };
-const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message']], ['shifts', 'Смены', ['pro', 'shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
+const NGROUP = [['all', 'Все', null], ['apps', 'Отклики', ['new_application', 'accepted', 'rejected', 'member_left']], ['chat', 'Чаты', ['message', 'support']], ['shifts', 'Смены', ['pro', 'shift_cancelled', 'shift_completed', 'shift_closed', 'shift_updated', 'shift_overdue', 'removed', 'role', 'saved_gone', 'new_shift_from_fav', 'review']]];
 async function notifications(ctx) {
   const list = await api.notifications(S.role); let f = 'all';
   const draw = () => {
@@ -182,30 +183,32 @@ async function chats(ctx) {
   const other = S.role === 'contractor' ? ['Исполнитель', 'worker'] : ['Подрядчик', 'owner'];
   const preview = (last, mine) => last ? `<div class="cprev">${last.mine || mine ? '<span class="you">Вы:</span> ' : last.name ? `<span class="you">${esc(String(last.name).split(' ')[0])}:</span> ` : ''}${esc(last.text)}</div>` : '<div class="cprev mut">Сообщений пока нет — напишите первым</div>';
   const doneShift = (st) => st === 'completed' || st === 'cancelled';   // чаты завершённых смен уходят в архив
+  // личный чат — в архиве, если смена завершена/отменена или от неё отказались (отклик отозван, отклонён, исключение из команды)
+  const arcD = (d) => (d.archived !== undefined ? d.archived : doneShift(d.info.shift.status));
   const teamRow = (s) => {
     const end = s.status === 'completed' ? '<span class="tag o">Завершена</span>' : '';
     return `<div class="crow click ${s.unread ? 'un' : ''}" data-act="team" data-id="${s.id}"><span class="cav team">${ICON.users}</span><div class="cb"><div class="ctop"><b>${esc(s.title)}</b><span class="ctime">${s.last ? shortTime(s.last.at) : ''}</span></div>
         ${S.role === 'contractor' ? '' : `<div class="csub">${esc(s.contractor?.company || s.contractor?.name || '')}</div>`}<div class="csub">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${s.accepted_count}/${s.people} чел. ${end}</div>${preview(s.last)}</div>${s.unread ? '<i class="dot"></i>' : ''}</div>`;
   };
   const dmRow = (d) => `<div class="crow click ${d.unread ? 'un' : ''}" data-act="dm" data-id="${d.app_id}">${avatar(d.info.worker && S.role === 'contractor' ? d.info.worker.avatar : '', d.info.title)}<div class="cb"><div class="ctop"><b>${esc(d.info.title)} <span class="rt ${other[1]}">${other[0]}</span></b><span class="ctime">${d.last ? shortTime(d.last.at) : ''}</span></div>
-        <div class="csub">${esc(d.info.shift.title)} · ${esc(dateLabel(d.info.shift.date))} ${statusTag(d.info.application.status)}</div>${preview(d.last ? { text: d.last.text, mine: d.last.user_id === getSession().me, name: d.last.name } : null)}</div>${d.unread ? '<i class="dot"></i>' : ''}</div>`;
+        <div class="csub">${statusTag(d.info.application.status)} ${esc(d.info.shift.title)} · ${esc(dateLabel(d.info.shift.date))}</div>${preview(d.last ? { text: d.last.text, mine: d.last.user_id === getSession().me, name: d.last.name } : null)}</div>${d.unread ? '<i class="dot"></i>' : ''}</div>`;
   const draw = () => {
     const tAct = teams.filter((s) => !doneShift(s.status)), tArc = teams.filter((s) => doneShift(s.status));
-    const dAct = dms.filter((d) => !doneShift(d.info.shift.status)), dArc = dms.filter((d) => doneShift(d.info.shift.status));
+    const dAct = dms.filter((d) => !arcD(d)), dArc = dms.filter(arcD);
     const unA = tAct.some((x) => x.unread), unD = dAct.some((x) => x.unread), unR = tArc.some((x) => x.unread) || dArc.some((x) => x.unread);
     const tabs = `<div class="tabsx"><span class="chip ${tab === 'team' ? 'on' : ''}" data-act="ctab" data-t="team">Команды · ${tAct.length}${unA ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'dm' ? 'on' : ''}" data-act="ctab" data-t="dm">Личные · ${dAct.length}${unD ? ' <i class="dot"></i>' : ''}</span><span class="chip ${tab === 'arc' ? 'on' : ''}" data-act="ctab" data-t="arc">Архив · ${tArc.length + dArc.length}${unR ? ' <i class="dot"></i>' : ''}</span></div>`;
     let body;
     if (tab === 'team') body = tAct.length ? tAct.map(teamRow).join('') : emptyState('Командных чатов пока нет', S.role === 'contractor' ? 'Чат команды появится, когда вы примете первого исполнителя.' : 'Чат команды появится, когда подрядчик примет ваш отклик.');
     else if (tab === 'arc') body = tArc.length || dArc.length
-      ? `<p class="mut sm" style="margin:0 0 8px">Сюда попадают чаты завершённых и отменённых смен. Переписку можно открыть и перечитать.</p>${tArc.length ? `<div class="sect">Команды</div>${tArc.map(teamRow).join('')}` : ''}${dArc.length ? `<div class="sect">Личные</div>${dArc.map(dmRow).join('')}` : ''}`
-      : emptyState('Архив пуст', 'Когда смена завершится, её чаты окажутся здесь.');
+      ? `<p class="mut sm" style="margin:0 0 8px">Сюда попадают чаты завершённых и отменённых смен, а также отозванных и отклонённых откликов. Переписку можно открыть и перечитать.</p>${tArc.length ? `<div class="sect">Команды</div>${tArc.map(teamRow).join('')}` : ''}${dArc.length ? `<div class="sect">Личные</div>${dArc.map(dmRow).join('')}` : ''}`
+      : emptyState('Архив пуст', 'Когда смена завершится или от неё откажутся, её чаты окажутся здесь.');
     else body = dAct.length ? dAct.map(dmRow).join('') : emptyState('Личных чатов пока нет', S.role === 'contractor' ? 'Здесь появятся переписки с исполнителями, откликнувшимися на ваши смены.' : 'Откликнитесь на смену — и здесь появится чат с подрядчиком.');
     const html = `<h1>Чаты</h1>${tabs}${body}`;
     if (ctx.main.dataset.h !== html) { const st = ctx.main.scrollTop; ctx.main.innerHTML = html; ctx.main.dataset.h = html; ctx.main.scrollTop = st; }
   };
   const load = async () => {
     [teams, dms] = await Promise.all([api.teamChats(S.role), api.myDialogs(S.role)]);
-    const liveT = teams.filter((x) => !doneShift(x.status)), liveD = dms.filter((x) => !doneShift(x.info.shift.status));
+    const liveT = teams.filter((x) => !doneShift(x.status)), liveD = dms.filter((x) => !arcD(x));
     if (!tab) tab = liveD.some((d) => d.unread) && !liveT.some((t) => t.unread) ? 'dm' : !liveT.length && liveD.length ? 'dm' : 'team';
     draw();
   };
@@ -216,24 +219,27 @@ async function chats(ctx) {
 }
 
 // ---------- чат (общий компонент) ----------
-async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}) {
+// readOnly — текст вместо поля ввода (архивный чат: переписку можно читать, но не писать)
+const ROLE_LABEL = { owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель', support: 'Поддержка', user: 'Пользователь' };
+async function chatView(ctx, scope, head, { canPin = false, extraTop = '', readOnly = '', placeholder = 'Сообщение' } = {}) {
   const me = getSession().me;
   ctx.render(`<div class="chat">${head}${extraTop}<div class="pin" id="pin" hidden></div><div class="msgs" id="msgs"></div>
-    <form class="compose" id="cf" autocomplete="off"><input id="ci" placeholder="Сообщение" maxlength="2000" autocomplete="off" enterkeyhint="send"><button type="submit" id="cs" aria-label="Отправить">➤</button></form></div>`, { full: true });
+    ${readOnly ? `<div class="compose ro">${esc(readOnly)}</div>` : `<form class="compose" id="cf" autocomplete="off"><input id="ci" placeholder="${esc(placeholder)}" maxlength="2000" autocomplete="off" enterkeyhint="send"><button type="submit" id="cs" aria-label="Отправить">➤</button></form>`}</div>`, { full: true });
   const box = document.getElementById('msgs'); let last = 0; const seen = new Set(); const cache = {};
   const add = (list) => {
     const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
     for (const m of list) {
       if (seen.has(m.id)) continue; seen.add(m.id); last = Math.max(last, m.id); cache[m.id] = m;
       const d = document.createElement('div'); d.className = 'm' + (m.user_id === me ? ' me' : ''); d.dataset.act = 'msg'; d.dataset.id = m.id;
-      d.innerHTML = `<div class="who ${m.role}">${m.user_id === me ? 'Вы' : `<span class="wlink" data-act="uprof" data-id="${m.user_id}" data-r="${m.role}" role="link">${esc(m.name)}</span>`}<span class="rt ${m.role}">${{ owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель' }[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
+      const who = m.user_id === me ? 'Вы' : m.role === 'support' || m.role === 'user' ? esc(m.name) : `<span class="wlink" data-act="uprof" data-id="${m.user_id}" data-r="${m.role}" role="link">${esc(m.name)}</span>`;
+      d.innerHTML = `<div class="who ${m.role}">${who}<span class="rt ${m.role}">${ROLE_LABEL[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
       box.appendChild(d);
     }
     if (list.length && (near || last === list[list.length - 1].id)) box.scrollTop = box.scrollHeight;
   };
   ctx.acts.uprof = (el) => go(el.dataset.r === 'owner' ? '#/w/contractor/' + el.dataset.id : '#/c/worker/' + el.dataset.id);
   const pinBar = (list) => { const p = list.find((m) => m.pinned); const el = document.getElementById('pin'); if (el) { el.hidden = !p; if (p) el.textContent = '📌 ' + p.text; } };
-  const chatLink = scope.startsWith('shift:') ? '#/team/' + scope.slice(6) : '#/chat/' + scope.slice(3);
+  const chatLink = scope.startsWith('shift:') ? '#/team/' + scope.slice(6) : scope.startsWith('support:') ? '#/support' : '#/chat/' + scope.slice(3);
   const seenChat = () => api.markRead(chatLink).then(() => refreshMe()).catch(() => {});
   seenChat();
   add(await api.messages(scope, 0));
@@ -242,21 +248,26 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '' } = {}
   const syncPin = async () => { const p = await api.messages(scope, 0, 'pin'); Object.values(cache).forEach((x) => (x.pinned = false)); p.forEach((x) => { (cache[x.id] = cache[x.id] || x).pinned = true; }); pinBar(all()); };
   const team = scope.startsWith('shift:');
   if (team) await syncPin().catch(() => pinBar(all())); else pinBar(all());
-  ctx.poll = async () => { const l = await api.messages(scope, last); add(l); if (l.length) seenChat(); if (team) await syncPin(); };
+  ctx.poll = async () => {
+    const l = await api.messages(scope, last), incoming = l.some((m) => !seen.has(m.id) && m.user_id !== me);
+    add(l); if (l.length) seenChat(); if (incoming) notifyFeel(); if (team) await syncPin();
+  };
   // Отправка: кнопка, Enter и клавиша «Отправить» на телефоне идут через submit формы.
   // На телефоне касание кнопки обрабатываем сразу (touchstart) и не даём полю потерять фокус:
   // иначе первое касание лишь прячет клавиатуру, экран перестраивается и нажатие теряется.
   const input = document.getElementById('ci'), btn = document.getElementById('cs');
-  const send = async () => {
+  const send = readOnly ? null : async () => {
     const text = input.value.trim(); if (!text) return;
     input.value = '';
     const tmp = document.createElement('div'); tmp.className = 'm me sending'; tmp.innerHTML = `${esc(text)}<div class="t">отправка…</div>`; box.appendChild(tmp); box.scrollTop = box.scrollHeight;
     try { const m = await api.sendMessage(scope, text, uid()); tmp.remove(); add([m]); track('message_sent', { scope: scope.split(':')[0] }); }
     catch (e) { tmp.remove(); if (!input.value) input.value = text; toast(errMsg(e), 'err'); }
   };
-  document.getElementById('cf').onsubmit = (e) => { e.preventDefault(); send(); };
-  btn.addEventListener('touchstart', (e) => { e.preventDefault(); send(); }, { passive: false });
-  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  if (send) {
+    document.getElementById('cf').onsubmit = (e) => { e.preventDefault(); send(); };
+    btn.addEventListener('touchstart', (e) => { e.preventDefault(); send(); }, { passive: false });
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+  }
   ctx.acts.msg = (el) => {
     const m = cache[el.dataset.id]; const mine = m.user_id === me;
     const s = sheet(`${canPin ? `<button class="btn block" data-a="pin">${m.pinned ? 'Открепить' : 'Закрепить'}</button><div style="height:8px"></div>` : ''}${mine ? '' : '<button class="btn danger block" data-a="rep">Пожаловаться</button>'}`);
@@ -279,7 +290,13 @@ async function dmChat(ctx, appId) {
     <a class="g sm" href="#" data-act="prof" style="display:inline-block;margin-top:8px">Профиль: ${esc(info.title)} · ${other} ›</a>
     ${isC && st === 'pending' ? '<div class="row gap" style="margin-top:10px"><button class="btn danger sm grow" data-act="rej">Отклонить</button><button class="btn pri sm grow" data-act="acc">Принять</button></div>' : ''}
     ${st === 'accepted' ? '<a class="g sm" href="#" data-act="team" style="display:inline-block;margin-top:8px">Общий чат команды смены ›</a>' : ''}</div>`;
-  await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title + ' · ' + other)}</div>`, { extraTop: top });
+  // отказ от смены — чат в архиве: переписку видно, писать нельзя
+  const iAmWorker = info.application.worker_id === meId;
+  const readOnly = info.shift.status === 'cancelled' ? 'Смена отменена — чат в архиве'
+    : st === 'rejected' ? (iAmWorker ? 'Подрядчик отклонил отклик — чат в архиве' : 'Вы отклонили отклик — чат в архиве')
+    : st === 'cancelled' ? (info.application.withdrawn ? (iAmWorker ? 'Вы отозвали отклик — чат в архиве. Откликнитесь снова, чтобы продолжить' : 'Исполнитель отозвал отклик — чат в архиве') : 'Участие в смене отменено — чат в архиве')
+    : '';
+  await chatView(ctx, 'dm:' + appId, `<div style="padding:0 12px">${pageHead(info.title + ' · ' + other)}</div>`, { extraTop: top, readOnly });
   ctx.acts.prof = () => go(info.application.worker_id === meId ? '#/w/contractor/' + info.shift.contractor_id : '#/c/worker/' + info.application.worker_id);
   const decide = (d, q) => async () => { if (!(await confirmBox(q, { ok: d === 'accepted' ? 'Принять' : 'Отклонить', danger: d === 'rejected' }))) return; await api.decide(appId, d); toast(d === 'accepted' ? 'Исполнитель принят' : 'Отклик отклонён', 'ok'); dmChat(ctx, appId); };
   ctx.acts.team = () => go('#/team/' + info.shift.id);
@@ -365,9 +382,9 @@ async function proPage(ctx) {
   draw();
   ctx.acts.pw = (el) => { who = el.dataset.w; draw(); };
   ctx.acts.buy = () => {
-    const sh = sheet(`<h3>Оплата подключается</h3><p class="mut sm">Приём платежей за PRO мы подключаем — скоро появится оплата картой прямо в Telegram. Пока PRO можно получить у администратора: напишите нам, и мы подключим её вам.</p>${S.cfg && S.cfg.support_url ? '<button class="btn pri block" id="sup">Написать в поддержку</button>' : ''}<button class="btn ghost block" id="cl" style="margin-top:8px">Понятно</button>`);
+    const sh = sheet(`<h3>Оплата подключается</h3><p class="mut sm">Приём платежей за PRO мы подключаем — скоро появится оплата картой прямо в Telegram. Пока PRO можно получить у администратора: напишите нам, и мы подключим её вам.</p>${S.cfg && (S.cfg.support || S.cfg.support_url) ? '<button class="btn pri block" id="sup">Написать в поддержку</button>' : ''}<button class="btn ghost block" id="cl" style="margin-top:8px">Понятно</button>`);
     sh.el.querySelector('#cl').onclick = () => sh.close();
-    const b = sh.el.querySelector('#sup'); if (b) b.onclick = () => { sh.close(); const url = S.cfg.support_url; if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(url)) tg.openTelegramLink(url); else if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener'); };
+    const b = sh.el.querySelector('#sup'); if (b) b.onclick = () => { sh.close(); openSupport(); };
   };
 }
 
@@ -409,7 +426,94 @@ async function review(ctx, sid) {
   };
 }
 
+// ---------- служба поддержки ----------
+// Пользователь пишет в свой чат support:<id>; сотрудники поддержки (SUPPORT_TG_IDS) получают обращение в Telegram
+// и отвечают там же (реплаем) или здесь, в списке обращений. Если поддержка не настроена — старая ссылка SUPPORT_URL.
+export function openSupport() {
+  if (S.cfg && S.cfg.support) return go('#/support');
+  const url = S.cfg && S.cfg.support_url; if (!url) return toast('Поддержка временно недоступна', 'err');
+  if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(url)) tg.openTelegramLink(url); else if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener');
+}
+async function supportChat(ctx, uid) {
+  const me = getSession().me, agent = uid !== undefined && Number(uid) !== me;
+  if (agent && !S.user.is_support) return go('#/');
+  let title = 'Поддержка', sub = 'Опишите вопрос или проблему — сотрудник поддержки ответит здесь, ответ продублируем в Telegram.';
+  if (agent) {
+    const x = (await api.supportInbox().catch(() => [])).find((i) => i.user_id === Number(uid));
+    title = x ? x.name : 'Обращение #' + uid; sub = x && x.username ? '@' + x.username : '';
+  }
+  await chatView(ctx, 'support:' + (agent ? Number(uid) : me), `<div style="padding:0 12px">${pageHead(title)}${sub ? `<p class="mut sm" style="margin:-4px 0 8px">${esc(sub)}</p>` : ''}</div>`,
+    { placeholder: agent ? 'Ответ пользователю' : 'Ваш вопрос' });
+}
+async function supportInbox(ctx) {
+  if (!S.user.is_support) return go('#/');
+  const row = (x) => `<div class="crow click ${x.waiting ? 'un' : ''}" data-act="open" data-id="${x.user_id}">${avatar(x.avatar, x.name)}<div class="cb"><div class="ctop"><b>${esc(x.name)}</b><span class="ctime">${shortTime(x.last.at)}</span></div>
+    <div class="csub">${x.waiting ? 'Ждёт ответа' : 'Отвечено'}${x.username ? ' · @' + esc(x.username) : ''}</div><div class="cprev">${x.last.mine ? '<span class="you">Вы:</span> ' : ''}${esc(x.last.text)}</div></div>${x.waiting ? '<i class="dot"></i>' : ''}</div>`;
+  const load = async () => {
+    const list = await api.supportInbox();
+    const html = `${pageHead('Обращения в поддержку')}<p class="mut sm" style="margin:0 0 8px">Новые обращения приходят вам и в Telegram — там можно ответить реплаем на сообщение бота.</p>${list.length ? list.map(row).join('') : emptyState('Обращений пока нет', 'Когда пользователь напишет в поддержку, обращение появится здесь.')}`;
+    if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
+  };
+  ctx.main.dataset.h = ''; await load(); ctx.poll = load;
+  ctx.acts.open = (el) => go('#/support/' + el.dataset.id);
+}
+
+// ---------- подтверждение номера ----------
+// Кодом (SMS или Telegram Gateway — если настроено на сервере) или без кода: «Поделиться номером» в чате с ботом.
+export function phoneSheet(onDone) {
+  const via = S.cfg && S.cfg.phone_code, where = via === 'tg_gateway' ? 'Telegram' : 'SMS';
+  const pre = (S.user.worker && S.user.worker.phone) || (S.user.contractor && S.user.contractor.phone) || '';
+  const s = sheet(`<h3>Подтверждение номера</h3>
+    ${via ? `<p class="mut sm">Пришлём код ${via === 'tg_gateway' ? 'в Telegram, привязанный к этому номеру' : 'в SMS'}. Номер другим пользователям не показывается, один номер — один аккаунт.</p>
+    <div id="ps1"><label class="f">Мобильный номер</label>${phoneField('pnum', pre)}<button class="btn pri block" id="psend" style="margin-top:12px">Получить код</button></div>
+    <div id="ps2" hidden><p class="sm" id="psent"></p><label class="f">Код из ${where}</label><input class="i codein" id="pcode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••">
+      <p class="sm" id="perr" style="color:var(--red);margin:6px 0 0" hidden></p>
+      <button class="btn pri block" id="pok" style="margin-top:12px">Подтвердить</button><button class="btn ghost block" id="pagain" style="margin-top:8px" disabled>Отправить код ещё раз</button></div>
+    <div class="sect">Или без кода</div><p class="mut sm" style="margin-top:0">В чате с ботом нажмите «Поделиться номером» — это номер вашего Telegram.</p>`
+    : '<p class="mut sm">Откроется чат с ботом: нажмите там «Поделиться номером» — это номер вашего Telegram — и вернитесь сюда, статус обновится сам. Номер другим пользователям не показывается, один номер — один аккаунт.</p>'}
+    <button class="btn ${via ? '' : 'pri'} block" id="ptg">Подтвердить через Telegram</button>`);
+  const $ = (id) => s.el.querySelector('#' + id);
+  $('ptg').onclick = () => { s.close(); openBot('verify'); };
+  if (!via) return;
+  const num = maskPhone($('pnum'));
+  let timer = null;
+  const countdown = (sec) => {
+    const b = $('pagain'); clearInterval(timer); b.disabled = true;
+    timer = setInterval(() => { if (!document.body.contains(b)) return clearInterval(timer); sec--; b.textContent = sec > 0 ? `Отправить код ещё раз · ${sec} с` : 'Отправить код ещё раз'; if (sec <= 0) { clearInterval(timer); b.disabled = false; } }, 1000);
+    b.textContent = `Отправить код ещё раз · ${sec} с`;
+  };
+  const sendCode = async (btn) => {
+    const p = num();
+    if (!/^9\d{9}$/.test(p)) return validate([[$('pnum'), false, 'Укажите мобильный номер: +7 9XX XXX-XX-XX']]);
+    btn.disabled = true;
+    try {
+      const r = await api.phoneSendCode(p);
+      $('ps1').hidden = true; $('ps2').hidden = false; $('perr').hidden = true;
+      $('psent').textContent = `Код отправлен на ${fmtPhone(r.phone)}. Он действует 10 минут.`;
+      countdown(r.resend_in || 60); $('pcode').value = ''; $('pcode').focus();
+    } catch (e) { toast(errMsg(e), 'err'); }
+    btn.disabled = false;
+  };
+  $('psend').onclick = (e) => sendCode(e.target);
+  $('pagain').onclick = (e) => sendCode(e.target);
+  const check = async () => {
+    const code = $('pcode').value.replace(/\D/g, '');
+    if (code.length !== 6) { $('perr').hidden = false; $('perr').textContent = 'Введите 6 цифр из ' + where; return; }
+    $('pok').disabled = true;
+    try {
+      const r = await api.phoneVerifyCode(code);
+      if (r.ok) { clearInterval(timer); s.close(); toast('Номер подтверждён ✅', 'ok'); await refreshMe(); if (onDone) onDone(); return; }
+      $('perr').hidden = false; $('perr').textContent = r.message; $('pcode').value = '';
+      if (r.left === 0) { $('ps2').hidden = true; $('ps1').hidden = false; }
+    } catch (e) { $('perr').hidden = false; $('perr').textContent = errMsg(e); }
+    $('pok').disabled = false;
+  };
+  $('pok').onclick = check;
+  $('pcode').addEventListener('input', () => { const v = $('pcode').value.replace(/\D/g, '').slice(0, 6); $('pcode').value = v; if (v.length === 6) check(); });
+}
+
 export const commonRoutes = [
   [/^#\/consent$/, consent], [/^#\/welcome$/, welcome], [/^#\/w\/onboard$/, workerForm], [/^#\/w\/edit$/, workerForm], [/^#\/c\/onboard$/, contractorForm], [/^#\/c\/edit-profile$/, contractorForm],
   [/^#\/notifications$/, notifications], [/^#\/chats$/, chats], [/^#\/chat\/(\d+)$/, dmChat], [/^#\/team\/(\d+)$/, team], [/^#\/pro$/, proPage], [/^#\/review\/(\d+)$/, review], [/^#\/reviews\/(worker|contractor)\/(\d+)$/, reviewsPage],
+  [/^#\/support$/, (ctx) => supportChat(ctx)], [/^#\/support\/(\d+)$/, supportChat], [/^#\/support-inbox$/, supportInbox],
 ];

@@ -4,8 +4,8 @@ import { CONFIG } from './config.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, openBot } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
-import { reportSheet, finishShift, shiftName } from './screens-common.js';
-import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock } from './screens-worker.js';
+import { reportSheet, finishShift, shiftName, phoneSheet } from './screens-common.js';
+import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock, phoneStatus } from './screens-worker.js';
 
 const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
@@ -103,10 +103,11 @@ export function parseShiftText(text) {
 function phoneGate(ctx) {
   ctx.render(`${pageHead('Новая смена')}<div class="card gate"><div class="gate-ic">${ICON.shield}</div><h2>Подтвердите номер телефона</h2>
     <p class="mut">Чтобы публиковать смены, нужен подтверждённый номер. Это защита от спама и подставных аккаунтов — исполнители видят, что подрядчик настоящий. Займёт полминуты.</p>
-    <ol class="gate-steps"><li>Нажмите кнопку ниже — откроется чат с ботом</li><li>Нажмите в чате «Поделиться номером» — это номер вашего Telegram</li><li>Вернитесь сюда — экран обновится сам</li></ol>
-    <button class="btn pri block" data-act="verify">Подтвердить в Telegram</button>
+    ${S.cfg && S.cfg.phone_code ? `<p class="mut">Укажите номер — пришлём код ${S.cfg.phone_code === 'tg_gateway' ? 'в Telegram' : 'в SMS'}. Или подтвердите без кода через бота.</p>`
+      : '<ol class="gate-steps"><li>Нажмите кнопку ниже — откроется чат с ботом</li><li>Нажмите в чате «Поделиться номером» — это номер вашего Telegram</li><li>Вернитесь сюда — экран обновится сам</li></ol>'}
+    <button class="btn pri block" data-act="verify">Подтвердить номер</button>
     <p class="mut sm" style="margin-top:10px">Номер используется только для защиты от дублей и спама и другим пользователям не показывается. Один номер — один аккаунт.</p></div>`);
-  ctx.acts.verify = () => openBot('verify');
+  ctx.acts.verify = () => phoneSheet(() => createOrEdit(ctx));
   ctx.poll = async () => { if (S.user && S.user.phone_verified) { ctx.poll = null; createOrEdit(ctx); } };
 }
 
@@ -297,9 +298,10 @@ async function profile(ctx) {
   ctx.render(`${heroCard({ rev: ['contractor', u.id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
-    ${u.phone_verified ? '<div class="okline">✓ Номер подтверждён — можно публиковать смены</div>' : '<button class="btn block" data-act="verify" style="margin-top:10px">Подтвердить номер, чтобы публиковать смены</button>'}
+    ${phoneStatus(u, u.phone_verified ? 'можно публиковать смены' : 'публиковать смены')}
     ${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
-  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile'); ctx.acts.verify = () => openBot('verify');
+  bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');
+  ctx.poll = async () => { if (!u.phone_verified && S.user.phone_verified) profile(ctx); };   // подтвердили в боте — обновляем статус
 }
 
 export const contractorRoutes = [

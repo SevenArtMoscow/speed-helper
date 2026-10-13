@@ -5,7 +5,7 @@ import { CONFIG } from './config.js';
 
 export const S = { user: null, role: null, cats: [], route: '', cfg: {} };
 
-// ---------- ощущения: вибрация и звук (настройки в профиле; вибрация включена, звук выключен по умолчанию) ----------
+// ---------- уведомления: вибрация и звук (настройки в профиле; вибрация включена, звук выключен по умолчанию) ----------
 const pref = (k, d) => { try { const v = localStorage.getItem('sh_' + k); return v === null ? d : v === '1'; } catch { return d; } };
 export const prefs = { get haptic() { return pref('haptic', true); }, get sound() { return pref('sound', false); }, set(k, v) { try { localStorage.setItem('sh_' + k, v ? '1' : '0'); } catch {} } };
 export function haptic(kind = 'light') {
@@ -17,16 +17,23 @@ export function haptic(kind = 'light') {
   } catch {}
 }
 let actx = null;
+const audio = () => { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume().catch(() => {}); return actx; };
+// браузер разрешает звук только после касания: «разогреваем» звук на первом нажатии, чтобы потом он играл и от новых уведомлений
+addEventListener('pointerdown', () => { if (prefs.sound) try { audio(); } catch {} }, { capture: true, passive: true });
 export function tick(kind = 'tap') {
   if (!prefs.sound) return;
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    audio();
     const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
     o.type = 'sine'; o.frequency.value = { tap: 520, ok: 760, no: 300, done: 880 }[kind] || 520;
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
     o.connect(g).connect(actx.destination); o.start(); o.stop(t + 0.15);
   } catch {}
 }
+
+// новое уведомление или сообщение, пока приложение открыто: звук и вибрация по настройкам, не чаще раза в 1,5 с
+let feltAt = 0;
+export function notifyFeel() { const now = Date.now(); if (now - feltAt < 1500) return; feltAt = now; haptic('medium'); tick('ok'); }
 
 export const BOLT = '<svg viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
 // Линейные иконки 24×24 (цвет — currentColor): нижнее меню и шапка
@@ -187,7 +194,7 @@ export function maskPhone(el) {
 }
 
 export const STATUS = {
-  pending: ['В ожидании', 'y'], accepted: ['Подтверждена', 'g'], rejected: ['Отклонена', 'r'], cancelled: ['Отменена', 'r'], completed: ['Завершена', 'o'],
+  pending: ['Ожидание', 'y'], accepted: ['Подтверждена', 'g'], rejected: ['Отклонена', 'r'], cancelled: ['Отменена', 'r'], completed: ['Завершена', 'o'],
   open: ['Открыта', 'g'], full: ['Набрана', 'y'],
 };
 // ---------- отзывы: видно, кто оставил; нажатие ведёт в профиль автора ----------
@@ -199,7 +206,7 @@ export function proCard(u) {
 }
 export const reviewCard = (r) => {
   const fromC = r.from_role === 'contractor', d = new Date(r.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-  const crit = Object.entries(r.criteria || {}).filter(([, v]) => v).map(([k, v]) => `<span class="tag">${esc(k)} · ${v}★</span>`).join(' ');
+  const crit = Object.entries(r.criteria || {}).filter(([, v]) => v).map(([k, v]) => `<span class="tag">${esc(k)} · ${esc(v)}★</span>`).join(' ');
   return `<div class="card review click" data-act="rprof" data-id="${r.from_user}" data-r="${r.from_role}"><div class="row sp" style="align-items:flex-start"><div class="row" style="min-width:0">${avatar(r.from_avatar, r.from_name, 'sm')}<div style="min-width:0"><b>${esc(r.from_name || 'Пользователь')}</b> <span class="rt ${fromC ? 'owner' : 'worker'}">${fromC ? 'Подрядчик' : 'Исполнитель'}</span><div class="mut sm">${esc(r.shift_title || '')} · ${d}</div></div></div><span class="star" style="flex:none">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span></div>
     ${crit ? `<div class="row wrap gap" style="margin-top:8px">${crit}</div>` : ''}${r.text ? `<div style="margin-top:8px">${esc(r.text)}</div>` : ''}<div class="g sm" style="margin-top:8px">Профиль автора ›</div></div>`;
 };

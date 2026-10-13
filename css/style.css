@@ -356,3 +356,9 @@ main.anim>*:nth-child(6){animation-delay:.2s}main.anim>*:nth-child(7){animation-
 .ptab.on{color:var(--txt);border-bottom-color:var(--txt)}.ptab.on sup{color:var(--g)}
 .callnum{display:block;text-align:center;font-size:26px;font-weight:800;margin:6px 0 14px;color:var(--txt);text-decoration:none;letter-spacing:.3px}
 button.callbtn{width:100%;border:0;font-family:inherit;text-align:left;cursor:pointer}
+
+/* поддержка, архивный чат, код подтверждения */
+.m .who.support{color:#6cb6ff}.m .who.user{color:var(--g)}
+.rt.support{background:rgba(108,182,255,.15);color:#6cb6ff}.rt.user{background:rgba(57,255,106,.13);color:var(--g)}
+.compose.ro{justify-content:center;align-items:center;text-align:center;color:var(--mut);font-size:13px;line-height:1.4;padding-top:12px}
+.codein{letter-spacing:10px;text-align:center;font-size:26px;font-weight:800}
