@@ -5,10 +5,10 @@ import { dist, isWeekend, todayISO, addDays, uid } from './util.js';
 
 const KEY = 'sh_local_db_v1';
 const DEFAULT_CATEGORIES = ['Грузчики', 'Разнорабочие', 'Склад / комплектация', 'Уборка', 'Погрузка / разгрузка', 'Курьеры', 'Промоутеры', 'Официанты / кухня', 'Монтаж / стройка', 'Прочее'];
-const WORKER_WEIGHTS = { name: 15, city: 10, age: 10, avatar: 10, phone: 5, about: 5, experience: 10, skills: 10, license: 5, medbook: 5, selfemployed: 5, night: 5, tools: 5 };
+const WORKER_WEIGHTS = { name: 15, city: 10, age: 15, avatar: 10, phone: 5, about: 5, experience: 10, skills: 10, license: 5, selfemployed: 5, night: 5, tools: 5 };
 
 const fresh = () => ({
-  seq: 1, users: [], workers: {}, contractors: {},
+  seq: 1, users: [], workers: {}, contractors: {}, drafts: {},
   categories: DEFAULT_CATEGORIES.map((name, i) => ({ id: i + 1, name, active: true })),
   shifts: [], applications: [], members: [], messages: [], favorites: [], skips: [],
   reviews: [], notifications: [], reports: [], events: [], audit: [], idem: {},
@@ -42,7 +42,7 @@ function notify(userId, type, text, link) { db.notifications.push({ id: id(), us
 export const profilePercent = (w) => {
   if (!w) return 0;
   const has = { name: !!w.name, city: !!w.city, age: !!w.age, avatar: !!w.avatar, phone: !!w.phone, about: !!w.about, experience: !!w.experience,
-    skills: arr(w.skills).length > 0, license: arr(w.license).length > 0, medbook: !!w.medbook, selfemployed: !!w.selfemployed, night: !!w.night, tools: !!w.tools };
+    skills: arr(w.skills).length > 0, license: arr(w.license).length > 0, selfemployed: !!w.selfemployed, night: !!w.night, tools: !!w.tools };
   return Object.entries(WORKER_WEIGHTS).reduce((s, [k, v]) => s + (has[k] ? v : 0), 0);
 };
 
@@ -65,7 +65,7 @@ function workerView(uidv, full) {
   const pct = profilePercent(w);
   const v = { user_id: uidv, name: w.name, avatar: w.avatar, city: w.city, age: w.age, skills: arr(w.skills), percent: pct,
     verified: pct >= CONFIG.MIN_VERIFIED_PERCENT, shifts_done: doneShifts(uidv), ...ratingOf(uidv),
-    about: w.about, experience: w.experience, license: arr(w.license), medbook: w.medbook, selfemployed: w.selfemployed, night: w.night, tools: w.tools };
+    about: w.about, experience: w.experience, license: arr(w.license), selfemployed: w.selfemployed, night: w.night, tools: w.tools };
   if (full) v.phone = w.phone;
   return v;
 }
@@ -89,6 +89,19 @@ function isSenior(shiftId, userId, perm) {
   return !!(m && (!perm || (m.perms || []).includes(perm)));
 }
 function canManage(s, userId, perm) { return s.contractor_id === userId || isSenior(s.id, userId, perm); }
+// анкету видят сам исполнитель, админ и подрядчик смены, на которую есть отклик (как _worker_visible в базе)
+function workerVisible(me, wid) { return me === wid || !!(db.users.find((u) => u.id === me) || {}).is_admin || db.applications.some((a) => a.worker_id === wid && canManage(shiftOr404(a.shift_id), me, 'applications')); }
+const EXTRA = ['photo', 'phone', 'about', 'experience', 'skills', 'license', 'selfemployed', 'preferences'];
+const extraOf = (u) => u.extra_consent || [];
+function extraFilled(uid) {
+  const w = db.workers[uid] || {}, c = db.contractors[uid] || {};
+  return [(w.avatar || c.avatar) && 'photo', w.phone && 'phone', (w.about || c.about) && 'about', w.experience && 'experience', arr(w.skills).length && 'skills', arr(w.license).length && 'license', w.selfemployed && 'selfemployed', (w.night || w.tools) && 'preferences'].filter(Boolean);
+}
+function clearExtra(uid, cats) {
+  const w = db.workers[uid], c = db.contractors[uid], has = (k) => cats.includes(k);
+  if (w) { if (has('photo')) w.avatar = null; if (has('phone')) w.phone = ''; if (has('about')) w.about = ''; if (has('experience')) w.experience = ''; if (has('skills')) w.skills = []; if (has('license')) w.license = []; if (has('selfemployed')) w.selfemployed = false; if (has('preferences')) { w.night = false; w.tools = false; } }
+  if (c) { if (has('photo')) c.avatar = null; if (has('about')) c.about = ''; }
+}
 function shiftOr404(sid) { const s = db.shifts.find((x) => x.id === sid); if (!s) fail('not_found', 'Смена не найдена'); return s; }
 
 function withIdem(userId, key, fn) {
@@ -114,11 +127,30 @@ const API = {
     const u = actor(me);
     return { id: u.id, tg_id: u.tg_id, first_name: u.first_name, username: u.username, roles: u.roles, is_admin: u.is_admin,
       worker: workerView(u.id, true), contractor: db.contractors[u.id] ? { ...db.contractors[u.id], ...contractorView(u.id) } : null,
-      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length, phone_verified: true,
+      unread: db.notifications.filter((n) => n.user_id === u.id && !n.read).length, phone_verified: !!u.phone_verified || u.is_admin, phone_number: u.phone_verified || null,
       unread_worker: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'worker') === 'worker').length,
-      unread_contractor: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'contractor') === 'contractor').length, terms_accepted: true };
+      unread_contractor: db.notifications.filter((n) => n.user_id === u.id && !n.read && (nrole(n) || 'contractor') === 'contractor').length,
+      terms_accepted: !!u.terms_ok, had_terms: false, extra_consent: extraOf(u), extra_pending: extraFilled(u.id).filter((c) => !extraOf(u).includes(c)), draft_pending: !!(db.drafts && db.drafts[u.id] && db.drafts[u.id].pending) };
   },
-  acceptTerms() { return true; },
+  acceptTerms(me, p = {}) {
+    if (p.age18 !== true || p.terms !== true) fail('invalid', 'Подтвердите, что вам исполнилось 18 лет, и примите Пользовательское соглашение');
+    actor(me).terms_ok = true; return true;
+  },
+  giveExtraConsent(me, p = {}) {
+    const u = actor(me); if (p.agreed !== true) fail('invalid', 'Отметьте согласие');
+    const cats = arr(p.categories); if (!cats.length || cats.some((c) => !EXTRA.includes(c))) fail('invalid', 'Некорректный список данных');
+    u.extra_consent = [...new Set([...extraOf(u), ...cats])]; return API.me(me);
+  },
+  revokeExtraConsent(me, list) {
+    const u = actor(me), cats = list ? arr(list) : EXTRA;
+    clearExtra(me, cats); u.extra_consent = extraOf(u).filter((c) => !cats.includes(c)); return API.me(me);
+  },
+  myConsents() { return []; },
+  devVerifyPhone(me) { actor(me).phone_verified = '9000000000'; return true; },   // только локальный режим: на сервере номер подтверждает бот
+  phoneReset(me) { actor(me).phone_verified = null; return API.me(me); },
+  saveShiftDraft(me, d) { actor(me); db.drafts = db.drafts || {}; db.drafts[me] = d; return true; },
+  getShiftDraft(me) { return (db.drafts && db.drafts[me]) || null; },
+  deleteShiftDraft(me) { if (db.drafts) delete db.drafts[me]; return true; },
   deleteAccount() { fail('invalid', 'В локальном режиме разработки удаление недоступно — используйте «Стереть все локальные данные»'); },
   categories() { return db.categories.filter((c) => c.active); },
 
@@ -127,20 +159,20 @@ const API = {
     const name = String(p.name || '').trim(), city = String(p.city || '').trim(), age = Number(p.age);
     if (name.length < 2) fail('invalid', 'Укажите имя');
     if (!city) fail('invalid', 'Укажите город');
-    if (!(age >= 16 && age <= 90)) fail('invalid', 'Укажите возраст (16–90)');
-    if (!p.avatar && !(db.workers[me] || {}).avatar) fail('invalid', 'Добавьте фото');
-    db.workers[me] = { ...(db.workers[me] || {}), ...p, name, city, age, skills: arr(p.skills).map((s) => String(s).trim()).filter(Boolean), license: arr(p.license) };
+    if (!(Number.isInteger(age) && age >= 18 && age <= 90)) fail('invalid', 'Укажите точный возраст: целое число от 18 лет');
+    const ok = extraOf(u), has = (c) => ok.includes(c);
+    db.workers[me] = { name, city, age, avatar: has('photo') ? p.avatar || null : null, phone: has('phone') ? p.phone || '' : '', about: has('about') ? p.about || '' : '', experience: has('experience') ? p.experience || '' : '',
+      skills: has('skills') ? arr(p.skills).map((s) => String(s).trim()).filter(Boolean) : [], license: has('license') ? arr(p.license) : [], selfemployed: has('selfemployed') && !!p.selfemployed, night: has('preferences') && !!p.night, tools: has('preferences') && !!p.tools };
     if (!u.roles.includes('worker')) u.roles.push('worker');
     return API.me(me);
   },
   saveContractor(me, p) {
     const u = actor(me);
-    const name = String(p.name || '').trim(), city = String(p.city || '').trim(), phone = String(p.phone || '').replace(/\D/g, '');
+    const name = String(p.name || '').trim(), city = String(p.city || '').trim();
     if (name.length < 2) fail('invalid', 'Укажите имя');
     if (!city) fail('invalid', 'Укажите город');
-    if (phone.length < 10) fail('invalid', 'Укажите телефон');
-    const old = db.contractors[me] || {};
-    db.contractors[me] = { ...old, ...p, name, city, phone: phone.slice(-10), verified: !!old.verified };
+    const old = db.contractors[me] || {}, ok = extraOf(u);
+    db.contractors[me] = { ...old, name, company: p.company, city, about: ok.includes('about') ? p.about || '' : '', avatar: ok.includes('photo') ? p.avatar || null : null, verified: !!old.verified };
     if (!u.roles.includes('contractor')) u.roles.push('contractor');
     return API.me(me);
   },
@@ -220,12 +252,13 @@ const API = {
     actor(me);
     const i = db.favorites.findIndex((f) => f.user_id === me && f.target_id === cid);
     if (i >= 0) { db.favorites.splice(i, 1); return false; }
+    if (!db.contractors[cid] && !workerVisible(me, cid)) fail('not_found', 'Пользователь не найден');
     db.favorites.push({ user_id: me, target_id: cid, at: now() }); return true;
   },
   favorites(me, kind) { // kind: 'contractor' | 'worker'
     actor(me);
     const ids = db.favorites.filter((f) => f.user_id === me).map((f) => f.target_id);
-    return kind === 'worker' ? ids.filter((i) => db.workers[i]).map((i) => workerView(i)) : ids.filter((i) => db.contractors[i]).map((i) => ({ ...contractorView(i), open_shifts: db.shifts.filter((s) => s.contractor_id === i && s.status === 'open' && !s.hidden && s.date >= todayISO()).length }));
+    return kind === 'worker' ? ids.filter((i) => db.workers[i] && workerVisible(me, i)).map((i) => workerView(i)) : ids.filter((i) => db.contractors[i]).map((i) => ({ ...contractorView(i), open_shifts: db.shifts.filter((s) => s.contractor_id === i && s.status === 'open' && !s.hidden && s.date >= todayISO()).length }));
   },
   favIds(me) { return db.favorites.filter((f) => f.user_id === me).map((f) => f.target_id); },
   searchContractors(me, q) {
@@ -240,18 +273,21 @@ const API = {
     const done = db.shifts.filter((s) => s.contractor_id === cid && s.status === 'completed' && !s.hidden).sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start));
     return { contractor: contractorView(cid), active_count: open.length, completed_count: done.length, completed: done.slice(0, 30).map((s) => shiftView(s, me, null)),
       shifts: open.map((s) => shiftView(s, me, null)),
-      reviews: db.reviews.filter((r) => r.to_user === cid).slice(-10).reverse().map((r) => ({ ...r, from_name: (db.workers[r.from_user] || db.contractors[r.from_user] || {}).name })), is_fav: db.favorites.some((f) => f.user_id === me && f.target_id === cid) };
+      reviews: db.reviews.filter((r) => r.to_user === cid).slice(-10).reverse().map((r) => (cid === me ? { ...r, from_name: (db.workers[r.from_user] || db.contractors[r.from_user] || {}).name } : { ...r, from_user: null, from_avatar: null, from_name: 'Исполнитель' }))
+      , is_fav: db.favorites.some((f) => f.user_id === me && f.target_id === cid) };
   },
   workerPage(me, wid) {
     actor(me);
-    const c = db.applications.some((a) => a.worker_id === wid && db.shifts.find((s) => s.id === a.shift_id)?.contractor_id === me);
-    return { worker: workerView(wid, c), reviews: db.reviews.filter((r) => r.to_user === wid).slice(-10).reverse().map((r) => ({ ...r, from_name: (db.contractors[r.from_user] || {}).name })), is_fav: db.favorites.some((f) => f.user_id === me && f.target_id === wid) };
+    if (!db.workers[wid] || !workerVisible(me, wid)) fail('not_found', 'Исполнитель не найден');
+    return { worker: workerView(wid, me === wid), active: [], active_count: 0, reviews: db.reviews.filter((r) => r.to_user === wid).slice(-10).reverse().map((r) => ({ ...r, from_name: (db.contractors[r.from_user] || {}).name })), is_fav: db.favorites.some((f) => f.user_id === me && f.target_id === wid) };
   },
 
   // ----- подрядчик -----
   createShift(me, p, reqId) {
-    actor(me);
+    const owner = actor(me);
     if (!db.contractors[me]) fail('profile_required', 'Сначала заполните профиль подрядчика');
+    if (!owner.phone_verified && !owner.is_admin) fail('phone_unverified', 'Подтвердите номер телефона через Telegram, чтобы публиковать смены');
+    if (db.drafts) delete db.drafts[me];
     return withIdem(me, reqId, () => {
       const title = String(p.title || '').trim(), address = String(p.address || '').trim();
       if (title.length < 3) fail('invalid', 'Укажите название смены');

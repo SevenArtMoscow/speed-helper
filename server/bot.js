@@ -75,7 +75,7 @@ export function startBot({ pool, token, appUrl, admins = [], support = [], oldTo
   async function setup() {
     await tg('deleteWebhook', {});
     username = (await tg('getMe', {})).username || '';
-    await tg('setMyCommands', { commands: [{ command: 'start', description: 'Открыть SPEED HELPER' }, { command: 'help', description: 'Как это работает' }, { command: 'privacy', description: 'Политика конфиденциальности' }] });
+    await tg('setMyCommands', { commands: [{ command: 'start', description: 'Открыть SPEED HELPER' }, { command: 'help', description: 'Как это работает' }, { command: 'privacy', description: 'Документы и персональные данные' }] });
     if (appUrl) await tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Открыть', web_app: { url: appUrl } } });
     await tg('setMyDescription', { description: 'SPEED HELPER — краткосрочные смены и исполнители. Найди работу на завтра или людей на смену за минуту.' }).catch(() => {});
     await tg('setMyShortDescription', { short_description: 'Смены на завтра и исполнители за минуту ⚡' }).catch(() => {});
@@ -121,7 +121,7 @@ export function startBot({ pool, token, appUrl, admins = [], support = [], oldTo
     const say = (text, markup) => tg('sendMessage', { chat_id: m.chat.id, text, reply_markup: markup || { remove_keyboard: true } });
     if (r === 'ok') { await say('Номер подтверждён ✅ Теперь можно публиковать смены.'); return tg('sendMessage', { chat_id: m.chat.id, text: 'Вернитесь в приложение — экран обновится сам.', reply_markup: openBtn('Открыть SPEED HELPER') }); }
     if (r === 'taken') return say('Этот номер уже привязан к другому аккаунту. Один номер — один аккаунт. Если это ваш старый аккаунт, удалите его в приложении (Профиль → Удалить аккаунт) и подтвердите номер снова.');
-    if (r === 'no_user') return say('Сначала откройте приложение и заполните профиль, затем подтвердите номер.', openBtn('Открыть SPEED HELPER'));
+    if (r === 'no_user') return say('Сначала откройте приложение и примите условия, затем подтвердите номер.', openBtn('Открыть SPEED HELPER'));
     if (r === 'foreign') return say('Пока принимаем только российские номера (+7).');
     return say('Не удалось прочитать номер. Попробуйте ещё раз.', phoneKeyboard);
   }
@@ -149,7 +149,7 @@ export function startBot({ pool, token, appUrl, admins = [], support = [], oldTo
       return sendWelcome(m.chat.id, `Привет, ${m.from.first_name || 'друг'}! 👋\n\nSPEED HELPER — смены на завтра и исполнители за минуту.\n• Исполнителям: свайпайте смены, откликайтесь, получайте подтверждение.\n• Подрядчикам: публикуйте смену и собирайте команду.\n\nУведомления об откликах и сменах будут приходить сюда.`, openBtn('🚀 Открыть SPEED HELPER'));
     }
     if (/^\/privacy\b/.test(text)) {
-      return tg('sendMessage', { chat_id: m.chat.id, text: `Политика конфиденциальности: ${appUrl}/legal/privacy.html\nПользовательское соглашение: ${appUrl}/legal/terms.html\n\nУдалить аккаунт и все данные можно в приложении: Профиль → Удалить аккаунт.` });
+      return tg('sendMessage', { chat_id: m.chat.id, text: `Пользовательское соглашение: ${appUrl}/legal/terms.html\nПолитика обработки персональных данных: ${appUrl}/legal/privacy.html\nСогласие на дополнительные данные: ${appUrl}/legal/additional-data.html\n\nУдалить аккаунт и все данные можно в приложении: Профиль → Удалить аккаунт.` });
     }
     if (/^\/help\b/.test(text)) {
       return tg('sendMessage', { chat_id: m.chat.id, text: 'Нажмите кнопку «Открыть» внизу чата или кнопку ниже. В приложении выберите роль — исполнитель или подрядчик — и заполните анкету. По вопросам и жалобам используйте кнопку «Пожаловаться» в приложении.', reply_markup: openBtn('Открыть SPEED HELPER') });

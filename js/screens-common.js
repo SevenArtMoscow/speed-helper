@@ -19,20 +19,105 @@ export function reportSheet(target_type, target_id) {
   };
 }
 
-// ---------- согласие с условиями (обязательно при первом входе) ----------
-export function openLegal(kind) { const url = location.origin + '/legal/' + kind + '.html'; if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener'); }
+// ---------- документы и согласия ----------
+// Адреса документов постоянные. Документ №3 — по адресу additional-data.html.
+const LEGAL_FILE = { terms: 'terms', privacy: 'privacy', additional: 'additional-data' };
+export const LEGAL_TITLE = { terms: 'Пользовательское соглашение', privacy: 'Политика обработки персональных данных', additional: 'Согласие на дополнительные данные' };
+export function openLegal(kind) { const url = location.origin + '/legal/' + LEGAL_FILE[kind] + '.html'; if (tg) tg.openLink(url); else window.open(url, '_blank', 'noopener'); }
+const checkbox = (id, html) => `<label class="chk"><input type="checkbox" id="${id}"><span class="box"></span><span class="sm">${html}</span></label>`;
+
+// две отдельные галочки без предварительного выбора; сервер проверяет их так же (api_acceptTerms)
 async function consent(ctx) {
+  const again = S.user.had_terms;
   ctx.render(`<div class="hero">
     <svg class="bolt" viewBox="0 0 24 24"><path fill="#39ff6a" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
-    <h1>Добро пожаловать</h1><p class="mut">Прежде чем начать, подтвердите условия использования.</p>
-    <div class="card" style="margin-top:18px"><div class="row" style="align-items:flex-start">${toggle(false, 'agree')}
-      <div class="sm" style="line-height:1.55">Я принимаю <a class="g" href="#" data-act="legal" data-u="terms">Пользовательское соглашение</a> и даю согласие на обработку моих персональных данных на условиях <a class="g" href="#" data-act="legal" data-u="privacy">Политики конфиденциальности</a>.</div></div></div>
-    <button class="btn pri block" data-act="accept" id="acc" disabled style="margin-top:10px;padding:16px">Продолжить</button>
-    <p class="mut sm" style="text-align:center;margin-top:14px">Данные нужны, чтобы подбирать смены и показывать ваш профиль подрядчикам. Аккаунт можно удалить в любой момент.</p></div>`);
-  ctx.acts.agree = (el) => { el.classList.toggle('on'); el.setAttribute('aria-checked', el.classList.contains('on')); document.getElementById('acc').disabled = !el.classList.contains('on'); };
+    <h1>${again ? 'Документы обновились' : 'Добро пожаловать'}</h1><p class="mut">${again ? 'Подтвердите возраст и примите новую редакцию соглашения, чтобы продолжить.' : 'Прежде чем начать, подтвердите условия использования.'}</p>
+    <div class="card" style="margin-top:18px">${checkbox('c18', 'Мне исполнилось 18 лет')}${checkbox('cterms', `Я принимаю <a class="g" href="#" data-act="legal" data-u="terms">${LEGAL_TITLE.terms}</a>`)}
+      <p class="mut sm" style="margin:12px 0 0"><a class="g" href="#" data-act="legal" data-u="privacy">${LEGAL_TITLE.privacy}</a></p></div>
+    <button class="btn pri block" data-act="accept" id="acc" disabled style="margin-top:10px;padding:16px">Продолжить</button></div>`);
+  const a18 = document.getElementById('c18'), at = document.getElementById('cterms');
+  const sync = () => { document.getElementById('acc').disabled = !(a18.checked && at.checked); };
+  a18.onchange = sync; at.onchange = sync;
   ctx.acts.legal = (el) => openLegal(el.dataset.u);
-  ctx.acts.accept = async () => { await api.acceptTerms(); S.user.terms_accepted = true; track('terms_accepted'); go('#/'); };
+  ctx.acts.accept = async () => { await api.acceptTerms({ age18: a18.checked, terms: at.checked }); await refreshMe(); track('terms_accepted'); go('#/'); };
 }
+
+// Дополнительные данные (документ №3): категории в том виде, как они записаны в согласии
+export const EXTRA_CATS = { photo: 'фотография профиля', phone: 'номер телефона в профиле', about: 'текст «О себе»', experience: 'сведения об опыте', skills: 'навыки', license: 'категории водительских прав', selfemployed: 'статус самозанятого', preferences: 'рабочие предпочтения и готовность' };
+const catList = (cats) => `<ul class="catlist">${cats.map((c) => `<li>${EXTRA_CATS[c] || esc(c)}</li>`).join('')}</ul>`;
+
+// Отдельное согласие. Ответ: true — согласие дано, false — без этих данных, null — закрыли окно (ничего не решено).
+export function extraConsentSheet(cats, { earlier = false } = {}) {
+  return new Promise((res) => {
+    const s = sheet(`<h3>${LEGAL_TITLE.additional}</h3>
+      <p class="mut sm">${earlier ? 'Вы заполнили эти сведения раньше. Теперь для них нужно отдельное согласие. Без него они будут удалены из профиля, а основные функции останутся доступны:' : 'Эти сведения необязательны. Без согласия мы их не сохраним, а поиск смен и отклики останутся доступны:'}</p>${catList(cats)}
+      <a class="g sm" href="#" id="xdoc">Полный текст согласия</a>
+      <div style="margin-top:12px">${checkbox('xok', 'Я даю согласие на обработку перечисленных дополнительных данных')}</div>
+      <button class="btn pri block" id="xyes" disabled style="margin-top:12px">Согласен, сохранить</button>
+      <button class="btn ghost block" id="xno" style="margin-top:8px">${earlier ? 'Удалить эти данные' : 'Продолжить без этих данных'}</button>`);
+    const $ = (id) => s.el.querySelector('#' + id);
+    const done = (v) => { s.close(); res(v); };
+    $('xok').onchange = () => { $('xyes').disabled = !$('xok').checked; };
+    $('xdoc').onclick = (e) => { e.preventDefault(); openLegal('additional'); };
+    $('xyes').onclick = () => done(true);
+    $('xno').onclick = () => done(false);
+    s.el.parentElement.addEventListener('click', (e) => { if (e.target === s.el.parentElement) res(null); });
+  });
+}
+
+// Перед сохранением анкеты: на заполненные категории без согласия спрашиваем его. Сервер в любом случае такие поля не сохранит.
+async function askExtraConsent(filled) {
+  const have = S.user.extra_consent || [], need = filled.filter((c) => !have.includes(c));
+  if (!need.length) return 'ok';
+  const r = await extraConsentSheet(need);
+  if (r === null) return null;
+  if (!r) return 'declined';
+  await api.giveExtraConsent({ agreed: true, categories: need });
+  await refreshMe();
+  return 'ok';
+}
+
+// Данные, заполненные до появления согласия: спрашиваем один раз за запуск приложения
+export async function earlierDataCheck() {
+  const pending = (S.user && S.user.extra_pending) || [];
+  if (!pending.length || S.earlierAsked) return;
+  S.earlierAsked = true;
+  const r = await extraConsentSheet(pending, { earlier: true });
+  if (r === null) return;
+  try {
+    if (r) await api.giveExtraConsent({ agreed: true, categories: pending });
+    else await api.revokeExtraConsent(pending);
+    await refreshMe(); go(location.hash);
+  } catch (e) { toast(errMsg(e), 'err'); }
+}
+
+// Настройки: отзыв согласия по одной категории или целиком; данные стираются из профиля и выдачи
+export function extraDataSheet() {
+  const have = S.user.extra_consent || [];
+  const s = sheet(`<h3>Дополнительные данные</h3>${have.length
+    ? `<p class="mut sm">Вы дали согласие на эти сведения. После отзыва они будут удалены из профиля, аккаунт останется.</p>${have.map((c) => `<div class="row sp" style="margin:10px 0"><span class="sm">${EXTRA_CATS[c] || esc(c)}</span><button class="btn sm danger" data-c="${esc(c)}">Отозвать</button></div>`).join('')}${have.length > 1 ? '<button class="btn danger block" data-all style="margin-top:8px">Отозвать всё</button>' : ''}`
+    : '<p class="mut sm">Согласие на дополнительные данные сейчас не действует. Его можно дать при заполнении необязательных полей профиля.</p>'}
+    <a class="g sm" href="#" id="xdoc" style="display:inline-block;margin-top:12px">${LEGAL_TITLE.additional}</a>`);
+  s.el.onclick = async (e) => {
+    if (e.target.id === 'xdoc') { e.preventDefault(); return openLegal('additional'); }
+    const b = e.target.closest('[data-c],[data-all]'); if (!b) return;
+    const cats = b.dataset.c ? [b.dataset.c] : null;
+    s.close();
+    if (!(await confirmBox('Отозвать согласие?', { ok: 'Отозвать', danger: true, sub: `Будет удалено из профиля: ${(cats || have).map((c) => EXTRA_CATS[c] || c).join(', ')}.` }))) return;
+    try { await api.revokeExtraConsent(cats); await refreshMe(); toast('Согласие отозвано, данные удалены', 'ok'); go(location.hash); }
+    catch (er) { toast(errMsg(er), 'err'); }
+  };
+}
+
+// «Подтвердить телефон» или «Позже». Подтверждается только через бота (или кодом, если он настроен на сервере).
+export function askPhone(sub, onDone) {
+  const s = sheet(`<h3>Подтвердите телефон</h3><p class="mut sm">${esc(sub)}</p>
+    <p class="mut sm">Откроется чат с ботом: нажмите «Поделиться номером» и вернитесь сюда. Номер другим пользователям не показывается.</p>
+    <button class="btn pri block" id="pyes">Подтвердить телефон</button><button class="btn ghost block" id="plater" style="margin-top:8px">Позже</button>`);
+  s.el.querySelector('#plater').onclick = () => s.close();
+  s.el.querySelector('#pyes').onclick = () => { s.close(); startPhoneCheck(onDone); };
+}
+export const startPhoneCheck = (onDone) => { if (S.cfg && S.cfg.phone_code) phoneSheet(onDone); else openBot('verify'); };
 
 // ---------- приветствие ----------
 async function welcome(ctx) {
@@ -52,17 +137,20 @@ async function welcome(ctx) {
 
 // ---------- анкеты ----------
 function photoField(cur) {
-  return `<div class="row" id="photo" data-field style="margin:8px 0"><div id="pv">${avatar(cur, '', 'lg')}</div><div><button class="btn sm" data-act="photo" type="button">Загрузить фото</button><input type="file" id="pf" accept="image/*" hidden><p class="mut sm" style="margin:6px 0 0">Обязательно</p></div></div>`;
+  return `<div class="row" id="photo" data-field style="margin:8px 0"><div id="pv">${avatar(cur, '', 'lg')}</div><div><div class="row gap wrap"><button class="btn sm" data-act="photo" type="button">Загрузить фото</button><button class="btn sm ghost" data-act="photoDel" id="pdel" type="button" ${cur ? '' : 'hidden'}>Удалить</button></div><input type="file" id="pf" accept="image/*" hidden><p class="mut sm" style="margin:6px 0 0">Необязательно</p></div></div>`;
 }
 function bindPhoto(ctx, box) {
   box.avatar = box.avatar || null;
+  const show = () => { document.getElementById('pv').innerHTML = avatar(box.avatar, '', 'lg'); document.getElementById('pdel').hidden = !box.avatar; };
   ctx.acts.photo = () => document.getElementById('pf').click();
+  ctx.acts.photoDel = () => { box.avatar = null; document.getElementById('pf').value = ''; show(); };
   document.getElementById('pf').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try { box.avatar = await resizeImage(f); } catch { return toast('Не удалось открыть фото. Выберите другое (JPG или PNG)', 'err'); }
-    document.getElementById('pv').innerHTML = avatar(box.avatar, '', 'lg'); clearError(document.getElementById('photo'));
+    show(); clearError(document.getElementById('photo'));
   };
-}const v = (id) => (document.getElementById(id) || {}).value;
+}
+const v = (id) => (document.getElementById(id) || {}).value;
 const sw = (id) => document.getElementById(id).classList.contains('on');
 
 async function workerForm(ctx) {
@@ -70,17 +158,17 @@ async function workerForm(ctx) {
   const editing = S.user.roles.includes('worker');
   const box = { avatar: w.avatar || null };
   const li = new Set(w.license || []);
-  ctx.render(reqMark(`${editing ? pageHead('Мой профиль') : `${pageHead('Расскажите о себе')}<p class="mut">Это увидят подрядчики. Остальное можно заполнить позже.</p>`}
+  ctx.render(reqMark(`${editing ? pageHead('Мой профиль') : `${pageHead('Расскажите о себе')}<p class="mut">Это увидит подрядчик, на смену которого вы откликнетесь. Остальное можно заполнить позже.</p>`}
     ${photoField(w.avatar)}
     <label class="f">Имя *</label><input class="i" id="name" value="${esc(w.name || S.user.first_name || '')}" maxlength="60">
-    <div class="grid2"><div><label class="f">Город *</label><input class="i" id="city" value="${esc(w.city || 'Москва')}"></div><div><label class="f">Возраст *</label><input class="i" id="age" type="number" inputmode="numeric" min="16" max="90" value="${esc(w.age || '')}"></div></div>
-    <h2>Дополнительно</h2><p class="mut sm">Пустые поля в профиле не показываются</p>
+    <div class="grid2"><div><label class="f">Город *</label><input class="i" id="city" value="${esc(w.city || 'Москва')}"></div><div><label class="f">Возраст, полных лет *</label><input class="i" id="age" type="number" inputmode="numeric" min="18" max="90" step="1" value="${esc(w.age || '')}"></div></div>
+    <h2>Дополнительно</h2><p class="mut sm">Необязательно. Пустые поля в профиле не показываются. Для этих сведений мы попросим отдельное согласие.</p>
     <label class="f">О себе</label><textarea class="i" id="about">${esc(w.about || '')}</textarea>
     <label class="f">Опыт работы</label><input class="i" id="experience" value="${esc(w.experience || '')}" placeholder="Например: 2 года на складе">
     <label class="f">Навыки (через запятую)</label><input class="i" id="skills" value="${esc((w.skills || []).join(', '))}" placeholder="погрузка, монтаж, уборка">
     <label class="f">Водительские права</label><div class="row wrap gap" id="lic">${LICENSES.map((l) => `<span class="chip ${li.has(l) ? 'on' : ''}" data-act="lic" data-l="${l}">${l}</span>`).join('')}</div>
     <label class="f">Телефон</label>${phoneField('phone', w.phone)}
-    ${[['medbook', 'Есть медкнижка'], ['selfemployed', 'Самозанятый'], ['night', 'Готов работать ночью'], ['tools', 'Умею работать с инструментом']].map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(w[k], 'tg', `id="${k}"`)}</div>`).join('')}
+    ${[['selfemployed', 'Самозанятый'], ['night', 'Готов работать ночью'], ['tools', 'Умею работать с инструментом']].map(([k, t]) => `<div class="row sp" style="margin:12px 0"><span>${t}</span>${toggle(w[k], 'tg', `id="${k}"`)}</div>`).join('')}
     <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`));
   bindPhoto(ctx, box);
   const phone = maskPhone(document.getElementById('phone'));
@@ -89,15 +177,17 @@ async function workerForm(ctx) {
   ctx.acts.save = async () => {
     const $ = (id) => document.getElementById(id), age = Number(v('age')), ph = phone();
     if (!validate([
-      [$('photo'), !!box.avatar, 'Добавьте фото — без него подрядчики не видят, кто откликнулся'],
       [$('name'), v('name').trim().length >= 2, 'Укажите имя'],
       [$('city'), v('city').trim().length > 0, 'Укажите город'],
-      [$('age'), Number.isInteger(age) && age >= 16 && age <= 90, 'Возраст от 16 до 90 лет'],
+      [$('age'), Number.isInteger(age) && age >= 18 && age <= 90, 'Сервис для тех, кому исполнилось 18 лет: укажите точный возраст целым числом'],
       [$('phone'), !ph || ph.length === 10, 'Номер неполный — нужно 10 цифр после +7'],
     ])) return;
-    await api.saveWorker({ name: v('name'), city: v('city'), age: v('age'), avatar: box.avatar, about: v('about').trim(), experience: v('experience').trim(), skills: v('skills').split(','), license: [...li], phone: ph ? '+7' + ph : '',
-      medbook: sw('medbook'), selfemployed: sw('selfemployed'), night: sw('night'), tools: sw('tools') });
-    await refreshMe(); setRole('worker'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'worker' });
+    const skills = v('skills').split(',').map((x) => x.trim()).filter(Boolean);
+    const extra = await askExtraConsent([box.avatar && 'photo', ph && 'phone', v('about').trim() && 'about', v('experience').trim() && 'experience', skills.length && 'skills', li.size && 'license', sw('selfemployed') && 'selfemployed', (sw('night') || sw('tools')) && 'preferences'].filter(Boolean));
+    if (extra === null) return;   // окно согласия закрыли — анкета остаётся на экране
+    await api.saveWorker({ name: v('name'), city: v('city'), age: v('age'), avatar: box.avatar, about: v('about').trim(), experience: v('experience').trim(), skills, license: [...li], phone: ph ? '+7' + ph : '',
+      selfemployed: sw('selfemployed'), night: sw('night'), tools: sw('tools') });
+    await refreshMe(); setRole('worker'); toast(extra === 'declined' ? 'Профиль сохранён без дополнительных данных' : 'Профиль сохранён', 'ok'); track('profile_saved', { role: 'worker' });
     go(editing ? '#/w/profile' : '#/w/search');
   };
 }
@@ -107,24 +197,25 @@ async function contractorForm(ctx) {
   const editing = S.user.roles.includes('contractor');
   const box = { avatar: c.avatar || null };
   ctx.render(reqMark(`${editing ? pageHead('Профиль подрядчика') : `${pageHead('Профиль подрядчика')}<p class="mut">Исполнители увидят это в ваших сменах.</p>`}
-    ${photoField(c.avatar).replace('Обязательно', 'Необязательно')}
+    ${photoField(c.avatar)}
     <label class="f">Имя *</label><input class="i" id="name" value="${esc(c.name || S.user.first_name || '')}">
     <label class="f">Название компании</label><input class="i" id="company" value="${esc(c.company || '')}" placeholder="Необязательно">
     <label class="f">Город *</label><input class="i" id="city" value="${esc(c.city || 'Москва')}">
-    <label class="f">Телефон *</label>${phoneField('phone', c.phone)}
     <label class="f">Кратко о себе</label><textarea class="i" id="about" placeholder="Необязательно">${esc(c.about || '')}</textarea>
     <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Продолжить'}</button>`));
   bindPhoto(ctx, box);
-  const phone = maskPhone(document.getElementById('phone'));
+  // сразу после выбора роли; подтверждённому номеру повторно не показываем
+  if (!editing && !S.user.phone_verified) askPhone('Без подтверждения можно смотреть приложение, а перед публикацией смены номер понадобится подтвердить.');
   ctx.acts.save = async () => {
     const $ = (id) => document.getElementById(id);
     if (!validate([
       [$('name'), v('name').trim().length >= 2, 'Укажите имя'],
       [$('city'), v('city').trim().length > 0, 'Укажите город'],
-      [$('phone'), phone().length === 10, phone() ? 'Номер неполный — нужно 10 цифр после +7' : 'Укажите телефон — по нему с вами свяжутся исполнители'],
     ])) return;
-    await api.saveContractor({ name: v('name'), company: v('company').trim(), city: v('city'), phone: phone(), about: v('about').trim(), avatar: box.avatar });
-    await refreshMe(); setRole('contractor'); toast('Профиль сохранён', 'ok'); track('profile_saved', { role: 'contractor' });
+    const extra = await askExtraConsent([box.avatar && 'photo', v('about').trim() && 'about'].filter(Boolean));
+    if (extra === null) return;
+    await api.saveContractor({ name: v('name'), company: v('company').trim(), city: v('city'), about: v('about').trim(), avatar: box.avatar });
+    await refreshMe(); setRole('contractor'); toast(extra === 'declined' ? 'Профиль сохранён без дополнительных данных' : 'Профиль сохранён', 'ok'); track('profile_saved', { role: 'contractor' });
     go(editing ? '#/c/profile' : '#/c/home');
   };
 }
@@ -221,7 +312,8 @@ async function chats(ctx) {
 // ---------- чат (общий компонент) ----------
 // readOnly — текст вместо поля ввода (архивный чат: переписку можно читать, но не писать)
 const ROLE_LABEL = { owner: 'Подрядчик', senior: 'Админ чата', worker: 'Исполнитель', support: 'Поддержка', user: 'Пользователь' };
-async function chatView(ctx, scope, head, { canPin = false, extraTop = '', readOnly = '', placeholder = 'Сообщение' } = {}) {
+// canProfiles — можно ли открыть анкету автора: в общем чате смены анкеты исполнителей видят только подрядчик и админ чата с правом на отклики
+async function chatView(ctx, scope, head, { canPin = false, extraTop = '', readOnly = '', placeholder = 'Сообщение', canProfiles = true } = {}) {
   const me = getSession().me;
   ctx.render(`<div class="chat">${head}${extraTop}<div class="pin" id="pin" hidden></div><div class="msgs" id="msgs"></div>
     ${readOnly ? `<div class="compose ro">${esc(readOnly)}</div>` : `<form class="compose" id="cf" autocomplete="off"><input id="ci" placeholder="${esc(placeholder)}" maxlength="2000" autocomplete="off" enterkeyhint="send"><button type="submit" id="cs" aria-label="Отправить">➤</button></form>`}</div>`, { full: true });
@@ -231,7 +323,7 @@ async function chatView(ctx, scope, head, { canPin = false, extraTop = '', readO
     for (const m of list) {
       if (seen.has(m.id)) continue; seen.add(m.id); last = Math.max(last, m.id); cache[m.id] = m;
       const d = document.createElement('div'); d.className = 'm' + (m.user_id === me ? ' me' : ''); d.dataset.act = 'msg'; d.dataset.id = m.id;
-      const who = m.user_id === me ? 'Вы' : m.role === 'support' || m.role === 'user' ? esc(m.name) : `<span class="wlink" data-act="uprof" data-id="${m.user_id}" data-r="${m.role}" role="link">${esc(m.name)}</span>`;
+      const who = m.user_id === me ? 'Вы' : m.role === 'support' || m.role === 'user' || (m.role !== 'owner' && !canProfiles) ? esc(m.name) : `<span class="wlink" data-act="uprof" data-id="${m.user_id}" data-r="${m.role}" role="link">${esc(m.name)}</span>`;
       d.innerHTML = `<div class="who ${m.role}">${who}<span class="rt ${m.role}">${ROLE_LABEL[m.role] || 'Исполнитель'}</span></div>${esc(m.text)}<div class="t">${hhmm(m.at)}</div>`;
       box.appendChild(d);
     }
@@ -313,14 +405,16 @@ async function team(ctx, sid) {
   const n = s.accepted_count;
   const head = `<div style="padding:0 12px">${pageHead(shiftName(s), can('remove') || isOwner ? '' : '')}
     <div class="row sp sm" style="margin-bottom:4px"><span>${n} / ${s.people} чел.</span><span class="row gap">${can('applications') ? '<a class="g" href="#" data-act="applic">Отклики ›</a>' : ''}<a class="g" href="#" data-act="members">Участники ›</a></span></div><div class="bar" style="margin-bottom:8px"><i style="width:${Math.min(100, (n / s.people) * 100)}%"></i></div></div>`;
-  await chatView(ctx, 'shift:' + sid, head, { canPin: can('pin') });
+  await chatView(ctx, 'shift:' + sid, head, { canPin: can('pin'), canProfiles: can('applications') });
   ctx.acts.members = () => membersSheet(T, sid, can, isOwner, ctx);
   ctx.acts.applic = () => go('#/c/shift/' + sid);
 }
 function membersSheet(T, sid, can, isOwner, ctx) {
   const me = getSession().me, s = T.shift;
   const roleTag = (m) => (m.role === 'owner' ? '<span class="tag r">Подрядчик</span>' : m.role === 'senior' ? '<span class="tag y">Админ чата</span>' : '<span class="tag g">Исполнитель</span>');
-  const sh = sheet(`<h3>Участники · ${T.members.filter((m) => m.role !== 'owner').length} / ${s.people}</h3>${T.members.map((m) => `<div class="row" style="margin:10px 0">${avatar(m.avatar, m.name, 'sm')}<div class="grow"><b class="click" data-p="${m.user_id}" data-r="${m.role}">${esc(m.name || '')}</b> ${roleTag(m)}${m.attended === true ? ' <span class="tag g">пришёл</span>' : m.attended === false ? ' <span class="tag r">не пришёл</span>' : ''}</div>
+  // анкету открывает только тот, кому она положена: подрядчик и админ чата с правом на отклики; профиль подрядчика открыт всем
+  const canOpen = (m) => m.role === 'owner' || m.user_id === me || can('applications');
+  const sh = sheet(`<h3>Участники · ${T.members.filter((m) => m.role !== 'owner').length} / ${s.people}</h3>${T.members.map((m) => `<div class="row" style="margin:10px 0">${avatar(m.avatar, m.name, 'sm')}<div class="grow"><b ${canOpen(m) ? `class="click" data-p="${m.user_id}" data-r="${m.role}"` : ''}>${esc(m.name || '')}</b> ${roleTag(m)}${m.attended === true ? ' <span class="tag g">пришёл</span>' : m.attended === false ? ' <span class="tag r">не пришёл</span>' : ''}</div>
       ${m.role !== 'owner' && m.user_id !== me && (can('attendance') || can('remove') || isOwner) ? `<button class="btn sm" data-m="${m.user_id}">⋯</button>` : ''}</div>`).join('')}
     ${isOwner && s.status !== 'completed' && s.status !== 'cancelled' ? '<button class="btn pri block" data-fin style="margin-top:12px">Смена завершена</button>' : ''}`);
   sh.el.onclick = async (e) => {

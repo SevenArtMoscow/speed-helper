@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { api, login, tg, MODE, track, getSession, publicConfig } from './api.js';
 import { S, logo, go, back, toast, errMsg, skeleton, setBell, unreadOf, callSheet, ICON, haptic, notifyFeel } from './ui.js';
 import { $, esc } from './util.js';
-import { commonRoutes } from './screens-common.js';
+import { commonRoutes, earlierDataCheck } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
 import { contractorRoutes } from './screens-contractor.js';
 import { adminRoutes } from './screens-admin.js';
@@ -105,7 +105,7 @@ async function route() {
     if (S.user && S.user.terms_accepted === false && h !== '#/consent') { h = '#/consent'; if (location.hash !== h) history.replaceState(null, '', h); }
     for (const [re, fn] of ROUTES) {
       const m = h.match(re);
-      if (m) { renderTabs(h); await fn(ctx, ...m.slice(1)); if (my !== navToken) return; ctx.main.scrollTop = 0; rise(ctx.main); track('screen', { r: h.split('/').slice(0, 3).join('/') }); return; }
+      if (m) { renderTabs(h); await fn(ctx, ...m.slice(1)); if (my !== navToken) return; ctx.main.scrollTop = 0; rise(ctx.main); track('screen', { r: h.split('/').slice(0, 3).join('/') }); if (h !== '#/consent') earlierDataCheck(); return; }
     }
     go('#/');
   } catch (e) {
