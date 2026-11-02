@@ -46,7 +46,8 @@ const FN_LIMITS = {
   sendMessage: [[40, 60e3], [600, 3600e3]], createShift: [[15, 3600e3]], apply: [[150, 3600e3]], report: [[10, 3600e3]], saveWorker: [[30, 3600e3]], saveContractor: [[30, 3600e3]],
   logError: [[30, 60e3]], track: [[120, 60e3]], searchContractors: [[60, 60e3]], deleteAccount: [[3, 3600e3]], toggleFav: [[60, 60e3], [300, 3600e3]], toggleShiftFav: [[60, 60e3]],
   // тяжёлые выборки: защищают базу от «долбёжки» одним аккаунтом
-  phoneSendCode: [[3, 60e3], [10, 3600e3]], phoneVerifyCode: [[10, 60e3], [30, 3600e3]], supportInbox: [[60, 60e3]],
+  phoneSendCode: [[3, 60e3], [10, 3600e3]], phoneVerifyCode: [[10, 60e3], [30, 3600e3]], supportInbox: [[60, 60e3]], phoneReset: [[10, 3600e3]],
+  acceptTerms: [[20, 60e3]], giveExtraConsent: [[30, 3600e3]], revokeExtraConsent: [[30, 3600e3]], saveShiftDraft: [[30, 60e3]],
   feed: [[120, 60e3]], leaderboard: [[20, 60e3]], contractorPage: [[90, 60e3]], workerPage: [[90, 60e3]], userReviews: [[60, 60e3]], myDialogs: [[60, 60e3]], teamChats: [[60, 60e3]],
 };
 const BIG_BODY = new Set(['saveWorker', 'saveContractor']);   // только они несут фото (до ~75 КБ в base64)
@@ -183,7 +184,6 @@ async function phoneSendCode(res, me, args) {
 // Статика: только файлы приложения (server/, supabase/, legacy/, .git — не раздаются)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 const PUBLIC = /^\/(index\.html|manifest\.json|sw\.js|(css|js|icons|legal)\/\w[\w.\-]*)$/;   // имя файла не может начинаться с точки (.., .env)
-const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 function serveStatic(req, res) {
   let p; try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400, SEC); return res.end('Bad request'); }
   if (p === '/') p = '/index.html';
@@ -194,8 +194,6 @@ function serveStatic(req, res) {
     // код приложения (html/js/css) — всегда свежий: модули без версий в URL, иначе после обновления смешаются старые и новые файлы
     const code = /\.(html|js|css)$/.test(p);
     const html = p.endsWith('.html');
-    // реквизиты оператора подставляются в юридические страницы из настроек сервера
-    if (p.startsWith('/legal/')) data = Buffer.from(data.toString().replace(/\{\{OPERATOR\}\}/g, esc(env.OPERATOR_NAME || '[укажите оператора: OPERATOR_NAME в server/.env]')).replace(/\{\{CONTACT\}\}/g, esc(env.OPERATOR_CONTACT || '[укажите контакт: OPERATOR_CONTACT в server/.env]')).replace(/\{\{DOMAIN\}\}/g, esc(new URL(env.APP_URL || 'https://localhost').host)));
     res.writeHead(200, { ...SEC, ...(html ? { 'Content-Security-Policy': CSP } : {}), 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': code ? 'no-cache' : 'public, max-age=300' });
     res.end(data);
   });

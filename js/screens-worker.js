@@ -5,7 +5,7 @@ import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, prefs, toggle } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
 import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce } from './util.js';
-import { reportSheet, shiftName, openLegal, openSupport, phoneSheet } from './screens-common.js';
+import { reportSheet, shiftName, openLegal, openSupport, startPhoneCheck, LEGAL_TITLE, extraDataSheet } from './screens-common.js';
 
 const FKEY = 'sh_filters_v1';
 const defFilters = () => ({ date: 'any', min_pay: 0, geo: 'any', categories: [] });
@@ -21,6 +21,13 @@ export const shiftCardBody = (s) => `<div class="row sp"><span class="row gap" s
   <div class="lns"><div class="ln">${ICON.cal}<span>${esc(dateLabel(s.date))} · ${esc(timeRange(s))}</span></div><div class="ln">${ICON.pin}<span>${esc(s.address)}</span></div><div class="ln">${ICON.users}<span>Нужно ${s.people} ${plural(s.people, 'человек', 'человека', 'человек')} · осталось мест: ${Math.max(0, s.people - s.accepted_count)}</span></div></div>
   ${s.description ? `<p class="mut" style="margin:10px 0 6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(s.description)}</p>` : ''}
   ${(s.requirements || []).length ? `<div class="row wrap gap" style="margin-top:6px">${s.requirements.map((r) => `<span class="tag">${esc(r)}</span>`).join('')}</div>` : ''}`;
+
+// До отправки отклика исполнитель видит, что именно получит подрядчик (п. 3.1 соглашения, п. 5.2 политики)
+const applyNote = () => {
+  const w = S.user.worker || {};
+  const extra = [w.avatar && 'фото', w.about && '«О себе»', w.experience && 'опыт', (w.skills || []).length && 'навыки', (w.license || []).length && 'категории прав', w.selfemployed && 'статус самозанятого', (w.night || w.tools) && 'рабочие предпочтения'].filter(Boolean);
+  return `<p class="mut sm applynote">При отклике подрядчик этой смены увидит: имя, город, возраст, рейтинг и отзывы${extra.length ? ', ' + extra.join(', ') : ''}. Телефон, Telegram ID, @username, домашний адрес и посторонняя переписка в анкету не входят.</p>`;
+};
 
 // ---------- поиск: свайпы / список / карта ----------
 async function search(ctx) {
@@ -96,7 +103,7 @@ async function search(ctx) {
 
   function drawDeck(body) {
     if (!queue.length) { body.innerHTML = empty(); return; }
-    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><div class="rbw"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">${ICON.undo}</button><span>Вернуть</span></div><div class="rbw"><button class="rb no" data-act="skip" aria-label="Пропустить">${ICON.close}</button><span>Пропуск</span></div><div class="rbw"><button class="rb save" data-act="save" aria-label="Отложить на потом">${ICON.bookmark}</button><span>Отложить</span></div><div class="rbw"><button class="rb ok" data-act="like" aria-label="Откликнуться">${ICON.check}</button><span>Отклик</span></div></div><p class="mut sm" style="text-align:center;margin:0">Свайп вправо — отклик · влево — пропуск</p>`;
+    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><div class="rbw"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">${ICON.undo}</button><span>Вернуть</span></div><div class="rbw"><button class="rb no" data-act="skip" aria-label="Пропустить">${ICON.close}</button><span>Пропуск</span></div><div class="rbw"><button class="rb save" data-act="save" aria-label="Отложить на потом">${ICON.bookmark}</button><span>Отложить</span></div><div class="rbw"><button class="rb ok" data-act="like" aria-label="Откликнуться">${ICON.check}</button><span>Отклик</span></div></div><p class="mut sm" style="text-align:center;margin:0">Свайп вправо — отклик · влево — пропуск</p>${applyNote()}`;
     const deck = document.getElementById('deck');
     [queue[1], queue[0]].forEach((s, i) => { if (!s) return; const c = document.createElement('div'); c.className = 'sc' + (i === 0 ? ' behind' : ''); c.dataset.id = s.id; c.innerHTML = `<span class="stamp ok">ОТКЛИК</span><span class="stamp no">ПРОПУСК</span><div class="body">${shiftCardBody(s)}</div><button class="btn ghost sm" data-act="open" data-id="${s.id}" style="margin-top:8px">Подробнее</button>`; deck.appendChild(c); });
     bindDrag(deck.lastElementChild);
@@ -198,7 +205,7 @@ async function skippedPage(ctx) {
     const l = list.filter(match);
     document.getElementById('skl').innerHTML = !list.length ? emptyState('Пропущенных смен нет', 'Здесь появятся смены, которые вы смахнули влево.', '<button class="btn pri" data-act="toSearch">К поиску смен</button>')
       : !l.length ? emptyState('Ничего не нашлось', 'Попробуйте другое слово.')
-      : l.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>
+      : applyNote() + l.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div>
         <div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="back2" data-id="${s.id}">↺ Вернуть в ленту</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('');
     const all = document.getElementById('skall'); if (all) all.hidden = list.length < 2;
   };
@@ -232,7 +239,7 @@ async function shiftPage(ctx, id) {
     <div class="card click row" data-act="contractor"><div>${avatar(s.contractor.avatar, s.contractor.name)}</div><div class="grow"><b>${esc(s.contractor.company || s.contractor.name)}</b><div class="sm">${stars(s.contractor.rating, s.contractor.reviews)} · ${s.contractor.shifts_done} ${plural(s.contractor.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>
     ${s.lat != null ? `<div id="map" style="height:200px;border-radius:16px;overflow:hidden;margin:10px 0 4px"></div><a class="g sm" href="${routeLink(s.lat, s.lng)}" target="_blank" rel="noopener" data-act="route">🧭 Маршрут в Яндекс Картах</a>` : ''}
     ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button><div style="height:8px"></div>` : ''}<button class="btn block" data-act="dm">💬 Написать подрядчику</button>` : ''}
-    ${canApply ? '<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button><div style="height:8px"></div><button class="btn block ghost" data-act="ask">💬 Задать вопрос подрядчику</button>' : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
+    ${canApply ? `${applyNote()}<button class="btn pri block" data-act="apply" style="padding:16px">Откликнуться</button><div style="height:8px"></div><button class="btn block ghost" data-act="ask">💬 Задать вопрос подрядчику</button>` : (!s.my_status && !mine ? `<p class="mut" style="text-align:center">${s.status === 'full' ? 'Все места заняты' : 'Смена закрыта'}</p>` : '')}`);
   if (s.lat != null) {
     let m = null; ctx.cleanup = () => m && m.remove();
     createMap(document.getElementById('map'), { center: [s.lat, s.lng], zoom: 15, geolocate: false })
@@ -290,7 +297,7 @@ async function fav(ctx) {
   let tab = sessionStorage.getItem('sh_favtab') || (saved.length || !list.length ? 'shifts' : 'c'), items = saved.slice();
   const draw = () => {
     const head = `<h1>Избранное</h1><div class="tabsx"><span class="chip ${tab === 'shifts' ? 'on' : ''}" data-act="ftab" data-t="shifts">Отложенные смены${items.length ? ` · ${items.length}` : ''}</span><span class="chip ${tab === 'c' ? 'on' : ''}" data-act="ftab" data-t="c">Подрядчики${list.length ? ` · ${list.length}` : ''}</span></div>`;
-    const shiftsHtml = items.length ? '<p class="mut sm">Смены, которые вы отложили «на потом»</p>' + items.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div><div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="unsave" data-id="${s.id}">Убрать</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('')
+    const shiftsHtml = items.length ? '<p class="mut sm">Смены, которые вы отложили «на потом»</p>' + applyNote() + items.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div><div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="unsave" data-id="${s.id}">Убрать</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('')
       : emptyState('Отложенных смен нет', 'Нажмите на закладку на карточке смены, чтобы вернуться к ней позже.', '<button class="btn pri" data-act="toSearch">К поиску смен</button>');
     const cHtml = list.length ? '<p class="mut sm">Подрядчики, которых вы сохранили</p>' + list.map((c) => `<div class="card"><div class="row">${avatar(c.avatar, c.name)}<div class="grow"><b>${esc(c.company || c.name)}</b>${verifiedTag(c.verified, 'Проверенный')}<div class="sm">${stars(c.rating, c.reviews)}</div></div></div>${c.about ? `<p class="mut sm">${esc(c.about)}</p>` : ''}
       ${c.open_shifts ? '' : '<p class="mut sm">У этого подрядчика сейчас нет актуальных смен.</p>'}<button class="btn block sm" data-act="c" data-id="${c.id}">Посмотреть объявления</button></div>`).join('') : emptyState('Пока пусто', 'Добавляйте подрядчиков в избранное на странице подрядчика.');
@@ -317,7 +324,8 @@ async function top(ctx) {
   const draw = async () => {
     const r = await api.leaderboard(per);
     const prizes = (S.cfg && S.cfg.prizes) || 'Лучшие исполнители месяца получают призы. Условия и призы объявит администратор.';
-    const row = (x) => `<div class="lb ${x.rank <= 3 ? 'p' + x.rank : ''} ${x.user_id === S.user.id ? 'me' : ''} click" data-act="prof" data-id="${x.user_id}"><div class="rk">${x.rank <= 3 ? MEDAL[x.rank - 1] : x.rank}</div>${avatar(x.avatar, x.name, 'sm')}<div class="grow"><b>${esc(x.name)}${x.user_id === S.user.id ? ' (вы)' : ''}</b><div class="mut sm">${x.shifts} ${plural(x.shifts, 'смена', 'смены', 'смен')}${x.rating != null ? ` · ★ ${x.rating}` : ''}</div></div><div class="lbs"><b>${x.score}</b><span>очков</span></div></div>`;
+    // остальные участники обезличены: анкета открывается только у себя (и у администратора)
+    const row = (x) => `<div class="lb ${x.rank <= 3 ? 'p' + x.rank : ''} ${x.user_id === S.user.id ? 'me' : ''} ${x.user_id ? `click" data-act="prof" data-id="${x.user_id}` : ''}"><div class="rk">${x.rank <= 3 ? MEDAL[x.rank - 1] : x.rank}</div>${avatar(x.avatar, x.name, 'sm')}<div class="grow"><b>${esc(x.name)}${x.user_id === S.user.id ? ' (вы)' : ''}</b><div class="mut sm">${x.shifts} ${plural(x.shifts, 'смена', 'смены', 'смен')}${x.rating != null ? ` · ★ ${x.rating}` : ''}</div></div><div class="lbs"><b>${x.score}</b><span>очков</span></div></div>`;
     const inTop = r.me && r.top.some((x) => x.user_id === S.user.id);
     const mine = !S.user.roles.includes('worker') ? '' : r.me ? (inTop ? '' : `<div class="card"><b>Ваше место: ${r.me.rank}</b><div class="mut sm">${r.me.score} очков · ${r.me.shifts} ${plural(r.me.shifts, 'смена', 'смены', 'смен')}</div></div>`)
       : '<div class="card"><b>Вы пока вне рейтинга</b><div class="mut sm">Выполните смену и получите оценку — и вы появитесь в таблице.</div></div>';
@@ -328,7 +336,7 @@ async function top(ctx) {
   };
   await draw();
   ctx.acts.per = async (el) => { per = el.dataset.p; sessionStorage.setItem('sh_lbper', per); await draw(); };
-  ctx.acts.prof = (el) => go('#/c/worker/' + el.dataset.id);
+  ctx.acts.prof = (el) => go(Number(el.dataset.id) === S.user.id ? '#/w/profile' : '#/c/worker/' + el.dataset.id);
 }
 
 async function contractorPage(ctx, id) {
@@ -353,7 +361,7 @@ async function contractorPage(ctx, id) {
 // ---------- профиль исполнителя ----------
 export function profileBlock(w, own) {
   const rows = [['pin', 'Город', w.city && esc(w.city)], ['user', 'Возраст', w.age && `${w.age} ${plural(w.age, 'год', 'года', 'лет')}`], ['work', 'Опыт', w.experience && esc(w.experience)], ['car', 'Права', (w.license || []).length && 'категории ' + esc(w.license.join(', '))]].filter(([, , v]) => v);
-  const feats = [w.medbook && pill('heart', 'Медкнижка'), w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
+  const feats = [w.selfemployed && pill('money', 'Самозанятый'), w.night && pill('moon', 'Ночные смены'), w.tools && pill('bolt', 'С инструментом')].filter(Boolean);
   const skills = (w.skills || []).map((s) => `<span class="pill plain">${esc(s)}</span>`);
   return heroCard({ rev: ['worker', w.user_id, w.reviews], pro: w.pro, av: w.avatar, name: w.name, verified: w.verified, tags: verifiedTag(w.verified, 'Проверенный исполнитель'),
       stats: [[w.rating == null ? '—' : w.rating.toFixed(1) + ' <small class="star">★</small>', w.reviews ? `${w.reviews} ${plural(w.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [w.shifts_done, plural(w.shifts_done, 'смена', 'смены', 'смен')], [w.percent + '%', 'профиль']] })
@@ -364,7 +372,7 @@ export function profileBlock(w, own) {
 // что именно добавить в профиль: пункты с «+N%», по нажатию — сразу в редактирование
 const TODO = [['avatar', 'Добавьте фото', 10, (w) => !!w.avatar], ['experience', 'Расскажите об опыте', 10, (w) => !!w.experience], ['skills', 'Укажите навыки', 10, (w) => (w.skills || []).length > 0],
   ['phone', 'Добавьте телефон', 5, (w) => !!w.phone], ['about', 'Напишите о себе', 5, (w) => !!w.about], ['license', 'Укажите водительские права', 5, (w) => (w.license || []).length > 0],
-  ['flags', 'Отметьте особенности (медкнижка, самозанятость, ночные, инструмент)', 5, (w) => w.medbook && w.selfemployed && w.night && w.tools]];
+  ['flags', 'Отметьте особенности (самозанятость, ночные, инструмент)', 5, (w) => w.selfemployed && w.night && w.tools]];
 function todoList(w) {
   if (w.percent >= 100) return '<p class="mut sm" style="margin:12px 0 0">Профиль заполнен полностью — отлично!</p>';
   const left = TODO.filter(([, , , has]) => !has(w)).slice(0, 3);
@@ -381,21 +389,22 @@ async function profile(ctx) {
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.poll = async () => { if (!u.phone_verified && S.user.phone_verified) profile(ctx); };   // подтвердили в боте — обновляем статус
 }
-// статус номера в своём профиле: подтверждён — номер и галочка; нет — кнопка подтверждения
+// статус номера в своём профиле: подтверждён — номер, галочка и смена номера; нет — кнопка подтверждения
 export const phoneStatus = (u, need = '') => (u.phone_verified
-  ? `<div class="okline">✓ Номер ${u.phone_number ? esc(fmtPhone(u.phone_number)) + ' ' : ''}подтверждён${need ? ' — ' + need : ''}</div>`
+  ? `<div class="okline">✓ Номер ${u.phone_number ? esc(fmtPhone(u.phone_number)) + ' ' : ''}подтверждён${need ? ' — ' + need : ''}</div>${u.phone_number ? '<button class="btn sm ghost" data-act="changePhone" style="margin-top:6px">Изменить номер</button>' : ''}`
   : `<button class="btn block" data-act="verifyPhone" style="margin-top:10px">${ICON.phone}Подтвердить номер телефона${need ? ', чтобы ' + need : ''}</button>`);
-// «Помощь и документы»: политика, соглашение, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
+// «Документы» и «Помощь»: документы №1–3, дополнительные данные, поддержка, удаление аккаунта (право на удаление данных — 152-ФЗ)
 export function helpBlock() {
   const link = (ic, t, act, extra = '') => `<div class="irow click" data-act="${act}" ${extra}><span class="ico">${ICON[ic]}</span><span class="k" style="color:var(--txt);font-size:15px">${t}</span><span class="v mut">›</span></div>`;
   return `<div class="sect">Уведомления</div><div class="card"><div class="row sp"><span>Звук</span>${toggle(prefs.sound, 'setSound')}</div><div class="row sp" style="margin-top:12px"><span>Вибрация</span>${toggle(prefs.haptic, 'setHaptic')}</div>
     <p class="mut sm" style="margin:10px 0 0">Сигнал о новых уведомлениях и сообщениях, пока приложение открыто. Уведомления в Telegram настраиваются в самом Telegram.</p></div>
-    <div class="sect">Помощь и документы</div><div class="info">${S.user.is_support ? link('users', 'Обращения в поддержку', 'supportInbox') : ''}${S.cfg && (S.cfg.support || S.cfg.support_url) ? link('chats', 'Написать в поддержку', 'support') : ''}${link('shield', 'Политика конфиденциальности', 'legal', 'data-u="privacy"')}${link('info', 'Пользовательское соглашение', 'legal', 'data-u="terms"')}</div>
+    <div class="sect">Документы</div><div class="info">${link('info', LEGAL_TITLE.terms, 'legal', 'data-u="terms"')}${link('shield', LEGAL_TITLE.privacy, 'legal', 'data-u="privacy"')}${link('edit', LEGAL_TITLE.additional, 'legal', 'data-u="additional"')}${link('user', 'Дополнительные данные и отзыв согласия', 'extraData')}</div>
+    ${S.user.is_support || (S.cfg && (S.cfg.support || S.cfg.support_url)) ? `<div class="sect">Помощь</div><div class="info">${S.user.is_support ? link('users', 'Обращения в поддержку', 'supportInbox') : ''}${S.cfg && (S.cfg.support || S.cfg.support_url) ? link('chats', 'Написать в поддержку', 'support') : ''}</div>` : ''}
     <button class="btn danger block" data-act="delAccount" style="margin-top:14px">Удалить аккаунт</button>`;
 }
 export function roleSwitch() {
   const other = S.role === 'worker' ? 'contractor' : 'worker';
-  return `<button class="btn block ghost" data-act="switch">${ICON.swap}${other === 'contractor' ? 'Режим подрядчика' : 'Режим исполнителя'}${S.user.roles.includes(other) ? '' : ' (создать профиль)'}</button>`;
+  return `<button class="btn block ghost" data-act="switch">${ICON.swap}${other === 'contractor' ? 'Перейти в режим подрядчика' : 'Перейти в режим исполнителя'}</button>`;
 }
 export function devPanel(u) {
   if (MODE !== 'local') return u.is_admin ? '<div style="height:8px"></div><button class="btn block ghost" data-act="admin">Админ-панель</button>' : '';
@@ -411,7 +420,13 @@ export function bindCommonProfile(ctx, u) {
   ctx.acts.legal = (el) => openLegal(el.dataset.u);
   ctx.acts.support = () => openSupport();
   ctx.acts.supportInbox = () => go('#/support-inbox');
-  ctx.acts.verifyPhone = () => phoneSheet(() => go(location.hash));
+  ctx.acts.verifyPhone = () => startPhoneCheck(() => go(location.hash));
+  // смена номера: подтверждение сбрасывается, новый номер подтверждается заново
+  ctx.acts.changePhone = async () => {
+    if (!(await confirmBox('Изменить номер?', { ok: 'Изменить', sub: 'Текущее подтверждение будет сброшено. Пока новый номер не подтверждён, публиковать смены нельзя.' }))) return;
+    await api.phoneReset(); await refreshMe(); toast('Подтверждение сброшено', 'ok'); go(location.hash); startPhoneCheck(() => go(location.hash));
+  };
+  ctx.acts.extraData = () => extraDataSheet();
   ctx.acts.delAccount = async () => {
     if (!(await confirmBox('Удалить аккаунт?', { ok: 'Продолжить', danger: true, sub: 'Профиль, избранное и уведомления будут стёрты, активные смены и отклики отменены. Это нельзя отменить.' }))) return;
     if (!(await confirmBox('Точно удалить навсегда?', { ok: 'Да, удалить', danger: true, sub: 'Рейтинг и история смен будут потеряны.' }))) return;

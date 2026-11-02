@@ -46,8 +46,6 @@ EOF
 fi
 # параметры, добавленные позже: дописываем пустыми, если их ещё нет
 add_env() { grep -q "^$1=" "$ENV" || printf '%s=%s\n' "$1" "$2" >> "$ENV"; }
-add_env OPERATOR_NAME ""     # оператор персональных данных — показывается в политике и соглашении
-add_env OPERATOR_CONTACT ""  # контакт для обращений по данным (e-mail или @username)
 add_env SUPPORT_URL ""       # ссылка на поддержку, например https://t.me/ваш_аккаунт
 add_env BACKUP_REMOTE ""     # куда копировать бэкапы БД (rsync), например user@host:/backups/speedhelper
 add_env SUPPORT_TG_IDS ""    # Telegram ID сотрудников поддержки через запятую — им бот пересылает обращения из приложения
@@ -299,7 +297,4 @@ else
   curl -fsS http://127.0.0.1:3000/api/health && echo "  <- сервер работает"
 fi
 echo
-for k in OPERATOR_NAME OPERATOR_CONTACT; do
-  grep -q "^$k=.\+" "$ENV" || echo "!! Не заполнено $k в $ENV — без этого в политике конфиденциальности останется пометка «укажите оператора»"
-done
 echo "Логи: journalctl -u speedhelper -f   |   Бэкап вручную: speedhelper-backup   |   Восстановление: speedhelper-restore <файл.dump>"

@@ -1,6 +1,6 @@
 // UI-компоненты, общее состояние
 import { esc, initials, $, fmtPhone } from './util.js';
-import { api, tg } from './api.js';
+import { api, tg, MODE } from './api.js';
 import { CONFIG } from './config.js';
 
 export const S = { user: null, role: null, cats: [], route: '', cfg: {} };
@@ -77,6 +77,8 @@ export const ICON = {
 // rev = [роль, id, число отзывов]: первая плитка (оценка) становится кнопкой «Все отзывы»
 // открыть чат с ботом (например, подтверждение номера: ?start=verify)
 export function openBot(start) {
+  // локальный режим разработки: бота нет, номер подтверждается сразу
+  if (MODE === 'local' && start === 'verify') { api.devVerifyPhone().then(refreshMe).then(() => toast('Локальный режим: номер подтверждён', 'ok')); return; }
   const name = S.cfg && S.cfg.bot;
   if (!name) { toast('Бот сейчас недоступен — напишите в поддержку', 'err'); return; }
   const url = `https://t.me/${name}${start ? '?start=' + start : ''}`;
@@ -207,8 +209,9 @@ export function proCard(u) {
 export const reviewCard = (r) => {
   const fromC = r.from_role === 'contractor', d = new Date(r.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   const crit = Object.entries(r.criteria || {}).filter(([, v]) => v).map(([k, v]) => `<span class="tag">${esc(k)} · ${esc(v)}★</span>`).join(' ');
-  return `<div class="card review click" data-act="rprof" data-id="${r.from_user}" data-r="${r.from_role}"><div class="row sp" style="align-items:flex-start"><div class="row" style="min-width:0">${avatar(r.from_avatar, r.from_name, 'sm')}<div style="min-width:0"><b>${esc(r.from_name || 'Пользователь')}</b> <span class="rt ${fromC ? 'owner' : 'worker'}">${fromC ? 'Подрядчик' : 'Исполнитель'}</span><div class="mut sm">${esc(r.shift_title || '')} · ${d}</div></div></div><span class="star" style="flex:none">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span></div>
-    ${crit ? `<div class="row wrap gap" style="margin-top:8px">${crit}</div>` : ''}${r.text ? `<div style="margin-top:8px">${esc(r.text)}</div>` : ''}<div class="g sm" style="margin-top:8px">Профиль автора ›</div></div>`;
+  // автор-исполнитель на открытой странице подрядчика обезличен: from_user нет, профиль не открывается
+  return `<div class="card review ${r.from_user ? `click" data-act="rprof" data-id="${r.from_user}" data-r="${r.from_role}` : ''}"><div class="row sp" style="align-items:flex-start"><div class="row" style="min-width:0">${avatar(r.from_avatar, r.from_name, 'sm')}<div style="min-width:0"><b>${esc(r.from_name || 'Пользователь')}</b> <span class="rt ${fromC ? 'owner' : 'worker'}">${fromC ? 'Подрядчик' : 'Исполнитель'}</span><div class="mut sm">${esc(r.shift_title || '')} · ${d}</div></div></div><span class="star" style="flex:none">${'★'.repeat(r.stars)}<span class="off">${'★'.repeat(5 - r.stars)}</span></span></div>
+    ${crit ? `<div class="row wrap gap" style="margin-top:8px">${crit}</div>` : ''}${r.text ? `<div style="margin-top:8px">${esc(r.text)}</div>` : ''}${r.from_user ? '<div class="g sm" style="margin-top:8px">Профиль автора ›</div>' : ''}</div>`;
 };
 // список отзывов на странице профиля + «Все отзывы»
 export const reviewsBlock = (list, total, role, uid) => (list && list.length

@@ -34,11 +34,14 @@ const ROOT = `http://127.0.0.1:${PORT}`, BASE = ROOT + '/api';
 for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 200)); }
 
 const initData = (user, token = TOKEN) => { const p = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify(user) }); const c = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n'); p.set('hash', crypto.createHmac('sha256', crypto.createHmac('sha256', 'WebAppData').update(token).digest()).update(c).digest('hex')); return p.toString(); };
-async function login(id, name, unverified = false) {
+// fresh — совсем новый пользователь: условия не приняты, согласий нет (для проверок регистрации и согласий)
+async function login(id, name, unverified = false, { fresh = false } = {}) {
   const r = await (await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id, first_name: name }) }) })).json();
   const call = async (fn, ...args) => { const res = await fetch(BASE + '/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + r.access_token }, body: JSON.stringify({ fn, args }) }); const j = await res.json().catch(() => ({})); return { status: res.status, body: j }; };
-  // по умолчанию тестовые пользователи с подтверждённым номером (уникальным), иначе подрядчики не смогли бы публиковать смены
-  if (!unverified) await db.query('update users set phone_verified = $2 where id = $1 and phone_verified is null', [r.user_id, String(9000000000 + id)]);
+  // по умолчанию тестовые пользователи приняли условия, дали все дополнительные согласия и подтвердили номер (уникальный),
+  // иначе подрядчики не смогли бы публиковать смены, а анкеты теряли бы необязательные поля
+  if (!fresh) await db.query("update users set terms_accepted_at = now(), terms_version = _doc_version('terms'), age_confirmed_at = now(), extra_consent = _extra_cats(), deleted_at = null where id = $1", [r.user_id]);
+  if (!unverified && !fresh) await db.query('update users set phone_verified = $2 where id = $1 and phone_verified is null', [r.user_id, String(9000000000 + id)]);
   return { id: r.user_id, call, token: r.access_token };
 }
 let pass = 0, fail = 0; const bugs = [];
@@ -62,15 +65,15 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await no('saveWorker возраст abc', W1.call('saveWorker', { ...wp, age: 'abc' }), 'invalid');
   await no('saveWorker возраст пусто', W1.call('saveWorker', { ...wp, age: '' }), 'invalid');
   await no('saveWorker возраст 10', W1.call('saveWorker', { ...wp, age: 10 }), 'invalid');
-  await no('saveWorker без фото', W1.call('saveWorker', { ...wp, avatar: null }), 'invalid');
+  await no('saveWorker возраст 17', W1.call('saveWorker', { ...wp, age: 17 }), 'invalid');
+  await no('saveWorker возраст дробный', W1.call('saveWorker', { ...wp, age: 18.5 }), 'invalid');
   await ok('saveWorker W1', W1.call('saveWorker', wp), (b) => b.roles.includes('worker'));
   await ok('saveWorker W2', W2.call('saveWorker', { ...wp, name: 'Анна' }));
   await ok('saveWorker W3', W3.call('saveWorker', { ...wp, name: 'Олег', phone: '' }));
-  const cp = { name: 'Иван', company: 'ООО Тест', city: 'Москва', phone: '9161234567', about: '' };
-  await no('saveContractor короткий телефон', C.call('saveContractor', { ...cp, phone: '916' }), 'invalid');
+  const cp = { name: 'Иван', company: 'ООО Тест', city: 'Москва', about: '' };
   await no('saveContractor без имени', C.call('saveContractor', { ...cp, name: '' }), 'invalid');
-  await ok('saveContractor C', C.call('saveContractor', cp), (b) => b.contractor.phone === '9161234567');
-  await ok('saveContractor C2', C2.call('saveContractor', { ...cp, name: 'Мария', phone: '+7 (926) 000-11-22' }), (b) => b.contractor.phone === '9260001122');
+  await ok('saveContractor C', C.call('saveContractor', cp), (b) => b.roles.includes('contractor'));
+  await ok('saveContractor C2: номер из формы не принимается, только подтверждённый', C2.call('saveContractor', { ...cp, name: 'Мария', phone: '+7 (926) 000-11-22' }), (b) => b.contractor.phone === b.phone_number && b.phone_number !== '9260001122');
 
   // ----- без профиля -----
   await no('apply без профиля', X.call('apply', 1), 'profile_required');
@@ -180,8 +183,8 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('toggleFav C→W1', C.call('toggleFav', W1.id));
   await ok('favorites worker', C.call('favorites', 'worker'), (b) => b.length === 1);
   await ok('contractorPage', W1.call('contractorPage', C.id), (b) => b.is_fav && b.shifts.length >= 1);
-  await ok('workerPage с телефоном (есть отклик)', C.call('workerPage', W1.id), (b) => b.worker.phone === wp.phone);
-  await ok('workerPage без телефона (нет отклика)', C2.call('workerPage', W1.id), (b) => !('phone' in b.worker));
+  await ok('workerPage: есть отклик — анкета без телефона', C.call('workerPage', W1.id), (b) => b.worker.name === wp.name && !('phone' in b.worker));
+  await no('workerPage: нет отклика — анкеты нет', C2.call('workerPage', W1.id), 'not_found');
 
   // ----- завершение и отзывы -----
   await no('completeShift чужим', C2.call('completeShift', S1.id), 'forbidden');
@@ -235,12 +238,13 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
 
 
   // ===== продакшен: согласие, удаление аккаунта, лимиты, заголовки =====
-  const T = await login(8001, 'Новый');
+  const accept = { age18: true, terms: true };
+  const T = await login(8001, 'Новый', true, { fresh: true });
   await ok('me: соглашение не принято', T.call('me'), (b) => b.terms_accepted === false);
-  await ok('acceptTerms', T.call('acceptTerms')); await ok('me: соглашение принято', T.call('me'), (b) => b.terms_accepted === true);
+  await ok('acceptTerms', T.call('acceptTerms', accept)); await ok('me: соглашение принято', T.call('me'), (b) => b.terms_accepted === true);
 
   // удаление аккаунта исполнителя: отклик и место в команде отменяются, профиль стёрт, подрядчик уведомлён
-  const D = await login(8002, 'Удаляемый'); await D.call('acceptTerms');
+  const D = await login(8002, 'Удаляемый');
   await ok('saveWorker D', D.call('saveWorker', { ...wp, name: 'Удаляемый Иван' }));
   const dsh = await ok('createShift для D', C.call('createShift', { ...sp, title: 'Смена для удаления', people: 5, date: day(3) }, key()));
   const dap = await ok('apply D', D.call('apply', dsh.id)); await ok('accept D', C.call('decide', dap.id, 'accepted'));
@@ -250,10 +254,10 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('после удаления: отклик отменён', C.call('applicants', dsh.id), (b) => b.find((x) => x.id === dap.id).status === 'cancelled');
   await ok('после удаления: сообщение обезличено', C.call('messages', 'shift:' + dsh.id, 0), (b) => b[0].text === '[сообщение удалено]');
   await ok('подрядчик уведомлён об уходе', C.call('notifications'), (b) => b.some((n) => n.type === 'member_left'));
-  await ok('D может зарегистрироваться заново', D.call('acceptTerms'));
+  await ok('D может зарегистрироваться заново', D.call('acceptTerms', accept));
 
   // удаление аккаунта подрядчика: открытые смены отменяются, исполнители уведомлены
-  const K = await login(8003, 'Удаляемый подрядчик'); await K.call('acceptTerms');
+  const K = await login(8003, 'Удаляемый подрядчик');
   await ok('saveContractor K', K.call('saveContractor', { ...cp, name: 'Удаляемая Мария' }));
   const ksh = await ok('createShift K', K.call('createShift', { ...sp, title: 'Смена удаляемого', date: day(3) }, key()));
   await ok('apply W2→K', W2.call('apply', ksh.id));
@@ -277,7 +281,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   check('nosniff на главной', page.headers.get('x-content-type-options') === 'nosniff');
   check('CSP разрешает карту и подсказки, но не eval', /tiles\.openfreemap\.org/.test(page.headers.get('content-security-policy')) && !/unsafe-eval/.test(page.headers.get('content-security-policy')));
   const priv = await (await fetch(ROOT + '/legal/privacy.html')).text();
-  check('политика: оператор подставлен', priv.includes('ООО Тестовый оператор') && priv.includes('help@example.test') && !priv.includes('{{'));
+  check('политика: реквизиты оператора на месте', priv.includes('Честных Сергей Сергеевич') && !priv.includes('{{'));
   const cfg = await (await fetch(BASE + '/config')).json();
   check('конфиг: ссылка поддержки', cfg.support_url === 'https://t.me/test_support');
   const leak = await (await fetch(ROOT + '/server/server.js')).text();
@@ -291,7 +295,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
 
   // ===== регрессия по итогам QA =====
   // рейтинг по ролям: оценка, полученная в одной роли, не попадает в профиль другой роли того же человека
-  await ok('QA: у C как исполнителя нет оценок (оценён как подрядчик)', W1.call('workerPage', C.id), (b) => b.worker.rating === null && b.reviews.length === 0);
+  await ok('QA: у C как исполнителя нет оценок (оценён как подрядчик)', A.call('workerPage', C.id), (b) => b.worker.rating === null && b.reviews.length === 0);
   await ok('QA: saveContractor W1', W1.call('saveContractor', { ...cp, name: 'Пётр-подрядчик' }));
   await ok('QA: у W1 как подрядчика нет оценок', C2.call('contractorPage', W1.id), (b) => b.contractor.rating === null && b.reviews.length === 0);
   await ok('QA: у W1 как исполнителя оценка 4', C.call('workerPage', W1.id), (b) => b.worker.rating === 4 && b.reviews.length === 1);
@@ -365,7 +369,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await no('NEW: админ чата не может отменить смену', W1.call('cancelShift', AS.id), 'forbidden');
   // профиль: активные задания
   await ok('NEW: подрядчик видит активные задания исполнителя', C.call('workerPage', W2.id), (b) => b.active_count === 1 && b.active.length === 1 && b.active[0].id === AS.id);
-  await ok('NEW: посторонний видит только число', C2.call('workerPage', W2.id), (b) => b.active_count === 1 && b.active.length === 0);
+  await no('NEW: постороннему анкета недоступна', C2.call('workerPage', W2.id), 'not_found');
   await ok('NEW: свои активные задания видны', W2.call('workerPage', W2.id), (b) => b.active.length === 1);
   await ok('NEW: мои исполнители', C.call('myWorkers'), (b) => b.some((x) => x.user_id === W2.id) && b.every((x) => 'together' in x));
   // необязательные отзывы
@@ -401,7 +405,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   const FW = await login(-5001, 'Тест Исполнитель'), FC = await login(-5002, 'Тест Подрядчик');
   await db.query('update users set is_fake = true where tg_id in (-5001, -5002)');
   await ok('FAKE: профиль исполнителя', FW.call('saveWorker', { ...wp, name: 'Тест Исполнитель' }));
-  await ok('FAKE: профиль подрядчика', FC.call('saveContractor', { ...cp, name: 'Тест Подрядчик', phone: '0000000001' }));
+  await ok('FAKE: профиль подрядчика', FC.call('saveContractor', { ...cp, name: 'Тест Подрядчик' }));
   const FS = await ok('FAKE: смена тестового подрядчика', FC.call('createShift', { ...sp, title: 'Тестовая смена симулятора', date: day(9), people: 1 }, key()));
   const fap = await ok('FAKE: отклик тестового исполнителя', FW.call('apply', FS.id));
   await ok('FAKE: принят', FC.call('decide', fap.id, 'accepted'));
@@ -429,10 +433,12 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('CHAT: личные чаты помечены «unread»', C.call('myDialogs', 'contractor'), (b) => b.every((d) => typeof d.unread === 'boolean'));
 
   // ===== отзывы: видно автора, переход в профиль, полный список =====
-  await ok('REV: страница подрядчика — у отзыва виден автор, роль, смена', W3.call('contractorPage', C.id), (b) => { const r = b.reviews[0]; return r && r.from_user === W1.id && r.from_role === 'worker' && r.from_name === 'Пётр' && r.shift_title === sp.title && r.stars === 5 && r.criteria['Условия'] === 5 && r.text === 'Отлично' && typeof r.at === 'number'; });
-  await ok('REV: полный список — всем доступен', C2.call('userReviews', C.id, 'contractor', 0), (b) => b.total === 1 && b.items.length === 1 && b.items[0].from_user === W1.id && b.name.length > 0 && b.rating === 5);
-  await ok('REV: у исполнителя W1 отзыв от подрядчика', C2.call('userReviews', W1.id, 'worker', 0), (b) => b.total === 1 && b.items[0].from_user === C.id && b.items[0].from_role === 'contractor');
-  await ok('REV: отзыв подрядчику не попадает в список «как исполнителю»', W3.call('userReviews', C.id, 'worker', 0), (b) => b.total === 0 && b.items.length === 0);
+  await ok('REV: страница подрядчика — отзыв с ролью и сменой, автор-исполнитель обезличен', W3.call('contractorPage', C.id), (b) => { const r = b.reviews[0]; return r && r.from_user === null && r.from_avatar === null && r.from_role === 'worker' && r.from_name === 'Исполнитель' && r.shift_title === sp.title && r.stars === 5 && r.criteria['Условия'] === 5 && r.text === 'Отлично' && typeof r.at === 'number'; });
+  await ok('REV: сам подрядчик видит автора отзыва', C.call('contractorPage', C.id), (b) => b.reviews[0].from_user === W1.id && b.reviews[0].from_name === 'Пётр');
+  await ok('REV: полный список подрядчика доступен всем', C2.call('userReviews', C.id, 'contractor', 0), (b) => b.total === 1 && b.items.length === 1 && b.items[0].from_user === null && b.name.length > 0 && b.rating === 5);
+  await ok('REV: у исполнителя W1 отзыв от подрядчика — виден подрядчику с откликом', C.call('userReviews', W1.id, 'worker', 0), (b) => b.total === 1 && b.items[0].from_user === C.id && b.items[0].from_role === 'contractor');
+  await no('REV: отзывы об исполнителе без отклика недоступны', W2.call('userReviews', W1.id, 'worker', 0), 'not_found');
+  await ok('REV: отзыв подрядчику не попадает в список «как исполнителю»', C.call('userReviews', C.id, 'worker', 0), (b) => b.total === 0 && b.items.length === 0);
   await ok('REV: постранично — смещение за пределы даёт пустой список', W3.call('userReviews', C.id, 'contractor', 20), (b) => b.items.length === 0 && b.total === 1);
   await no('REV: нет такого профиля', W3.call('userReviews', 99999, 'worker', 0), 'not_found');
   await no('REV: у человека нет роли подрядчика', W3.call('userReviews', W3.id, 'contractor', 0), 'not_found');
@@ -671,7 +677,7 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await db.query("update phone_codes set created_at = now() - interval '2 minutes' where user_id = $1", [PH2.id]);
   await ok('PHONE2: новый код', PH2.call('phoneSendCode', '9165550000'));
   await ok('PHONE2: подтверждение', PH2.call('phoneVerifyCode', smsCodes['79165550000']), (b) => b.ok === true);
-  await ok('PHONE2: пустой телефон в анкете заполнился и помечен подтверждённым', PH2.call('me'), (b) => b.worker.phone === '+79165550000' && b.worker.phone_ok === true);
+  await ok('PHONE2: подтверждённый номер не копируется в анкету', PH2.call('me'), (b) => !b.worker.phone && b.phone_number === '9165550000');
   const PH3 = await login(7403, 'Телефон3', true);
   const sf = await PH3.call('phoneSendCode', '9990000000');
   check('PHONE2: сбой провайдера — понятная ошибка, не 500', sf.status === 502 && sf.body.hint === 'send_failed', JSON.stringify(sf));
@@ -683,6 +689,163 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   const authWith = async (token) => { const r = await fetch(BASE + '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: initData({ id: 6101, first_name: 'Исп1' }, token) }) }); return { status: r.status, body: await r.json() }; };
   await ok('BOT: вход из прежнего бота (TG_BOT_TOKEN_OLD) — тот же аккаунт', authWith('654321:OLD_TEST'), (b) => b.user_id === W1.id);
   await no('BOT: подпись чужого бота не принимается', authWith('999:SOMEONE_ELSE'));
+
+  // ===== ТЗ ред. 2: регистрация и возраст =====
+  const R1 = await login(9001, 'Регистрация', true, { fresh: true });
+  await no('TZ1: без принятия условий профиль не сохранить', R1.call('saveWorker', wp), 'terms_required');
+  await no('TZ1: и смены не посмотреть', R1.call('feed', {}), 'terms_required');
+  await ok('TZ1: профиль и категории доступны до принятия', R1.call('categories'));
+  await no('TZ1: старый клиент без галочек', R1.call('acceptTerms'), 'invalid');
+  await no('TZ1: только 18+', R1.call('acceptTerms', { age18: true }), 'invalid');
+  await no('TZ1: только соглашение', R1.call('acceptTerms', { terms: true }), 'invalid');
+  await no('TZ1: галочка не логическое значение', R1.call('acceptTerms', { age18: 'true', terms: 1 }), 'invalid');
+  await ok('TZ1: после отказов условия не приняты', R1.call('me'), (b) => b.terms_accepted === false);
+  await ok('TZ1: обе галочки', R1.call('acceptTerms', { age18: true, terms: true }));
+  await ok('TZ1: повторное принятие не дублирует журнал', R1.call('acceptTerms', { age18: true, terms: true }));
+  await ok('TZ7: журнал: 18+ и соглашение с версией', R1.call('myConsents'), (b) => b.length === 2 && b.some((c) => c.doc === 'age18' && c.action === 'accept') && b.some((c) => c.doc === 'terms' && c.version === '1.2' && c.action === 'accept' && c.at > 0));
+  await no('TZ1: возраст меньше 18 прямым запросом', R1.call('saveWorker', { name: 'Юный', city: 'Москва', age: 17 }), 'invalid');
+  await no('TZ1: возраст строкой меньше 18', R1.call('saveWorker', { name: 'Юный', city: 'Москва', age: '16' }), 'invalid');
+  await ok('TZ1: подрядчику точный возраст не нужен', R1.call('saveContractor', { name: 'Без возраста', city: 'Москва' }), (b) => b.roles.includes('contractor'));
+  await no('TZ1: при переходе в исполнители возраст обязателен', R1.call('saveWorker', { name: 'Без возраста', city: 'Москва' }), 'invalid');
+  await ok('TZ3: исполнитель без фото заполняет профиль', R1.call('saveWorker', { name: 'Без фото', city: 'Москва', age: 30 }), (b) => b.worker.avatar === null);
+  const TZS = await ok('TZ3: смена для отклика без фото', C2.call('createShift', { ...sp, title: 'Отклик без фото', date: day(18), people: 3 }, key()));
+  const tzap = await ok('TZ3: отклик без фото', R1.call('apply', TZS.id), (b) => b.status === 'pending');
+  // анкета, заполненная раньше: возраст младше 18 больше не даёт откликаться
+  const OLD = await login(9002, 'Старая анкета'); await ok('TZ1: анкета', OLD.call('saveWorker', { ...wp, name: 'Старая анкета' }));
+  await db.query('update worker_profiles set age = 17 where user_id = $1', [OLD.id]);
+  await no('TZ1: отклик при возрасте младше 18', OLD.call('apply', TZS.id), 'profile_required');
+  // новая редакция соглашения требует повторного принятия
+  await db.query("insert into legal_versions(doc, version, title, body, sha256, published_at) values ('terms', '9.9', 'тест', 'тест', 'x', now() + interval '1 day')");
+  await ok('TZ7: новая редакция — условия снова не приняты', R1.call('me'), (b) => b.terms_accepted === false && b.had_terms === true);
+  await no('TZ7: до принятия новой редакции работать нельзя', R1.call('feed', {}), 'terms_required');
+  await ok('TZ7: принятие новой редакции', R1.call('acceptTerms', { age18: true, terms: true }));
+  await ok('TZ7: журнал хранит обе версии', R1.call('myConsents'), (b) => b.filter((c) => c.doc === 'terms').map((c) => c.version).join() === '1.2,9.9');
+  await db.exec("alter table legal_versions disable trigger legal_versions_frozen; delete from legal_versions where version = '9.9'; alter table legal_versions enable trigger legal_versions_frozen");
+  await db.query("update users set terms_version = _doc_version('terms') where terms_version = '9.9'");
+
+  // ===== ТЗ: телефон подрядчика =====
+  const P1 = await login(9101, 'Подрядчик без номера', true), P2 = await login(9102, 'Другой', true);
+  await ok('TZ2: профиль подрядчика без телефона', P1.call('saveContractor', { name: 'Без номера', city: 'Москва' }), (b) => b.contractor.phone === null && b.phone_verified === false);
+  await ok('TZ2: без подтверждения можно смотреть', P1.call('feed', {}));
+  await no('TZ2: неподтверждённый не публикует смену через API', P1.call('createShift', { ...sp, title: 'Без подтверждения', date: day(18) }, key()), 'phone_unverified');
+  await ok('TZ2: черновик сохраняется', P1.call('saveShiftDraft', { form: { title: 'Черновик' }, reqId: 'r1', pending: true }));
+  await ok('TZ2: черновик виден в профиле', P1.call('me'), (b) => b.draft_pending === true);
+  await ok('TZ2: черновик читается', P1.call('getShiftDraft'), (b) => b.form.title === 'Черновик' && b.reqId === 'r1');
+  await no('TZ2: слишком большой черновик', P1.call('saveShiftDraft', { x: 'я'.repeat(20000) }), 'invalid');
+  await ok('TZ2: чужой черновик не виден', P2.call('getShiftDraft'), (b) => b === null);
+  const ver = async (tgId, phone) => (await db.query('select bot_verify_phone($1, $2) as r', [tgId, phone])).rows[0].r;
+  check('TZ2: номер подтверждён контактом в боте', (await ver(9101, '+7 916 777-11-22')) === 'ok');
+  await ok('TZ2: статус обновился, номер в профиле подрядчика', P1.call('me'), (b) => b.phone_verified === true && b.phone_number === '9167771122' && b.contractor.phone === '9167771122');
+  await ok('TZ2: номер не виден другим', P2.call('contractorPage', P1.id), (b) => !('phone' in b.contractor) && !JSON.stringify(b).includes('9167771122'));
+  await ok('TZ2: повторное сохранение профиля подтверждение не сбрасывает', P1.call('saveContractor', { name: 'С номером', city: 'Москва' }), (b) => b.phone_verified === true);
+  const PDS = await ok('TZ2: публикация после подтверждения', P1.call('createShift', { ...sp, title: 'После подтверждения', date: day(18) }, key()));
+  await ok('TZ2: после публикации черновик удалён', P1.call('getShiftDraft'), (b) => b === null);
+  await ok('TZ2: смена номера сбрасывает подтверждение', P1.call('phoneReset'), (b) => b.phone_verified === false && b.phone_number === null && b.contractor.phone === null);
+  await no('TZ2: после сброса публиковать нельзя', P1.call('createShift', { ...sp, title: 'После сброса', date: day(18) }, key()), 'phone_unverified');
+  check('TZ2: номер снова свободен', (await ver(9102, '79167771122')) === 'ok');
+  const NEW1 = await login(9103, 'Без условий', true, { fresh: true });
+  check('TZ2: до принятия условий номер не подтверждается', (await ver(9103, '79167770000')) === 'no_user');
+  check('TZ2: контакт привязан к аккаунту отправителя', (await db.query('select count(*)::int as n from users where id = $1 and phone_verified is not null', [NEW1.id])).rows[0].n === 0);
+  await ok('TZ2: «Медкнижка» убирается из требований смены', C2.call('createShift', { ...sp, title: 'Без медкнижки', date: day(18), requirements: ['18+', 'Медкнижка', 'мед. книжка'] }, key()), (b) => JSON.stringify(b.requirements) === '["18+"]');
+  await ok('TZ2: и при изменении смены', C2.call('updateShift', TZS.id, { requirements: ['Медкнижка', 'Опыт'] }), (b) => JSON.stringify(b.requirements) === '["Опыт"]');
+
+  // ===== ТЗ: фото и медкнижка =====
+  const F1 = await login(9201, 'Фото');
+  await ok('TZ3: фото загружено', F1.call('saveWorker', { ...wp, name: 'С фото' }), (b) => b.worker.avatar === wp.avatar);
+  await ok('TZ3: сохранение без ключа фото его не трогает', F1.call('saveWorker', { name: 'С фото', city: 'Москва', age: 30 }), (b) => b.worker.avatar === wp.avatar);
+  await ok('TZ3: фото можно удалить', F1.call('saveWorker', { name: 'С фото', city: 'Москва', age: 30, avatar: null }), (b) => b.worker.avatar === null);
+  await ok('TZ3: подрядчик: фото загружено', F1.call('saveContractor', { name: 'С фото', city: 'Москва', avatar: wp.avatar }), (b) => b.contractor.avatar === wp.avatar);
+  await ok('TZ3: подрядчик: фото можно удалить', F1.call('saveContractor', { name: 'С фото', city: 'Москва', avatar: null }), (b) => b.contractor.avatar === null);
+  check('TZ4: столбца медкнижки в базе нет', (await db.query("select count(*)::int as n from information_schema.columns where table_name = 'worker_profiles' and column_name = 'medbook'")).rows[0].n === 0);
+  await ok('TZ4: поле не сохраняется и не возвращается', F1.call('saveWorker', { name: 'С фото', city: 'Москва', age: 30, medbook: true, nationality: 'x' }), (b) => !JSON.stringify(b).includes('medbook') && !JSON.stringify(b).includes('nationality'));
+  await ok('TZ4: анкета без поля у подрядчика', C2.call('applicants', TZS.id), (b) => b.length > 0 && !JSON.stringify(b).includes('medbook'));
+
+  // ===== ТЗ: дополнительные данные =====
+  const E1 = await login(9301, 'Согласие', true, { fresh: true }); await E1.call('acceptTerms', accept);
+  const full = { name: 'Согласие', city: 'Москва', age: 25, avatar: wp.avatar, phone: '+79160001122', about: 'о себе', experience: 'опыт', skills: ['сварка'], license: ['B'], selfemployed: true, night: true, tools: true };
+  await ok('TZ5: без согласия необязательные поля не сохраняются', E1.call('saveWorker', full), (b) => b.worker.avatar === null && !b.worker.phone && !b.worker.about && !b.worker.experience && b.worker.skills.length === 0 && b.worker.license.length === 0 && !b.worker.selfemployed && !b.worker.night && !b.worker.tools);
+  const E1S = await ok('TZ5: смена для проверки отказа', C2.call('createShift', { ...sp, title: 'Отказ от согласия', date: day(18), people: 3 }, key()));
+  await ok('TZ5: отказ не блокирует поиск смен', E1.call('feed', {}), (b) => Array.isArray(b.items));
+  await ok('TZ5: и отклик', E1.call('apply', E1S.id));
+  await no('TZ5: согласие без галочки', E1.call('giveExtraConsent', { categories: ['about'] }), 'invalid');
+  await no('TZ5: неизвестная категория', E1.call('giveExtraConsent', { agreed: true, categories: ['passport'] }), 'invalid');
+  await no('TZ5: пустой список', E1.call('giveExtraConsent', { agreed: true, categories: [] }), 'invalid');
+  await ok('TZ5: согласие на две категории', E1.call('giveExtraConsent', { agreed: true, categories: ['about', 'skills'] }), (b) => JSON.stringify(b.extra_consent) === '["about","skills"]');
+  await ok('TZ5: сохраняются только согласованные', E1.call('saveWorker', full), (b) => b.worker.about === 'о себе' && b.worker.skills[0] === 'сварка' && b.worker.avatar === null && !b.worker.experience);
+  await ok('TZ5: согласие дополняется', E1.call('giveExtraConsent', { agreed: true, categories: ['photo', 'preferences', 'phone'] }), (b) => b.extra_consent.length === 5);
+  await ok('TZ5: всё согласованное сохранилось', E1.call('saveWorker', full), (b) => b.worker.avatar === wp.avatar && b.worker.night === true && b.worker.phone === full.phone);
+  await ok('TZ6: дополнительные поля видны подрядчику отклика', C2.call('workerPage', E1.id), (b) => b.worker.about === 'о себе' && b.worker.skills[0] === 'сварка' && !('phone' in b.worker));
+  await ok('TZ5: отзыв одной категории', E1.call('revokeExtraConsent', ['about']), (b) => !b.worker.about && !b.extra_consent.includes('about') && b.worker.skills.length === 1);
+  await ok('TZ5: отзыв прекращает показ', C2.call('workerPage', E1.id), (b) => !b.worker.about);
+  await ok('TZ5: после отзыва поле снова не сохраняется', E1.call('saveWorker', full), (b) => !b.worker.about);
+  await ok('TZ5: отзыв всего', E1.call('revokeExtraConsent', null), (b) => b.extra_consent.length === 0 && b.worker.avatar === null && b.worker.skills.length === 0 && !b.worker.phone && !b.worker.night && b.worker.name === 'Согласие' && b.worker.age === 25);
+  await ok('TZ7: журнал: принятие, категории, отзыв', E1.call('myConsents'), (b) => { const x = b.filter((c) => c.doc === 'additional'); return x.length === 4 && x[0].action === 'accept' && x[0].version === '1.2' && x[0].categories.includes('about') && x[2].action === 'revoke' && x[2].categories[0] === 'about' && x[3].action === 'revoke'; });
+  await no('TZ7: журнал пользователя — не для всех', E1.call('adminConsents', E1.id), 'forbidden');
+  await ok('TZ7: журнал пользователя у админа', A.call('adminConsents', E1.id), (b) => b.log.length === 6 && Array.isArray(b.extra_consent));
+  check('TZ7: в журнале нет секретов', !JSON.stringify((await db.query('select * from consent_log')).rows).match(/hash=|TEST_ONLY|auth_date/));
+  // данные, заполненные до появления согласия: отмечены как ожидающие, отказ удаляет их
+  const E2 = await login(9302, 'Старые данные'); await ok('TZ5: анкета с данными', E2.call('saveWorker', { ...full, name: 'Старые данные' }));
+  await db.query("update users set extra_consent = '{}' where id = $1", [E2.id]);
+  await ok('TZ5: старые данные ждут согласия', E2.call('me'), (b) => b.extra_pending.includes('photo') && b.extra_pending.includes('about'));
+  await ok('TZ5: отказ стирает старые данные', E2.call('revokeExtraConsent', ['photo', 'phone', 'about', 'experience', 'skills', 'license', 'selfemployed', 'preferences']), (b) => b.extra_pending.length === 0 && b.worker.avatar === null);
+  await ok('TZ7: отказ записан отдельно от отзыва', E2.call('myConsents'), (b) => b.at(-1).action === 'decline' && b.at(-1).categories.length === 8);
+  // удаление аккаунта не менялось: журнал остаётся, состояние согласий и черновик стираются
+  const E3 = await login(9303, 'Удаление'); await E3.call('saveShiftDraft', { form: {} }); await E3.call('giveExtraConsent', { agreed: true, categories: ['about'] });
+  await ok('TZ7: удаление аккаунта работает как раньше', E3.call('deleteAccount'));
+  check('TZ7: журнал согласий сохранился', (await db.query('select count(*)::int as n from consent_log where user_id = $1', [E3.id])).rows[0].n === 1);
+  check('TZ7: состояние и черновик стёрты', (await db.query("select count(*)::int as n from users u where u.id = $1 and u.extra_consent = '{}' and u.terms_version is null and not exists (select 1 from shift_drafts d where d.user_id = u.id)", [E3.id])).rows[0].n === 1);
+
+  // ===== ТЗ: старт без каталога =====
+  const V1 = await login(9401, 'Анкета'), V2 = await login(9402, 'Подрядчик А'), V3 = await login(9403, 'Подрядчик Б'), V4 = await login(9404, 'Коллега');
+  await ok('TZ6: анкета', V1.call('saveWorker', { ...wp, name: 'Анкета', about: 'закрытое описание' })); await ok('TZ6: подрядчик А', V2.call('saveContractor', { ...cp, name: 'Подрядчик А' })); await ok('TZ6: подрядчик Б', V3.call('saveContractor', { ...cp, name: 'Подрядчик Б' })); await ok('TZ6: коллега', V4.call('saveWorker', { ...wp, name: 'Коллега' }));
+  await no('TZ6: без отклика анкета закрыта', V2.call('workerPage', V1.id), 'not_found');
+  const before = await V3.call('workerPage', V1.id), missing = await V3.call('workerPage', 99999);
+  check('TZ6: чужая анкета неотличима от несуществующей', before.status === missing.status && before.body.hint === missing.body.hint && before.body.message === missing.body.message, JSON.stringify([before, missing]));
+  let opened = 0; for (const i of [V1.id, V4.id, W1.id, W2.id, W3.id]) if ((await V3.call('workerPage', i)).status === 200) opened++;
+  check('TZ6: перебор номеров не открывает анкеты', opened === 0, 'открыто: ' + opened);
+  await no('TZ6: в избранное без отклика нельзя', V2.call('toggleFav', V1.id), 'not_found');
+  await db.query('insert into favorites(user_id, target_id) values ($1, $2) on conflict do nothing', [V2.id, V1.id]);
+  await ok('TZ6: старая запись в избранном не открывает анкету', V2.call('favorites', 'worker'), (b) => b.length === 0);
+  const VS = await ok('TZ6: смена А', V2.call('createShift', { ...sp, title: 'Смена А', date: day(18), people: 3 }, key()));
+  const VA = await ok('TZ6: отклик на смену А', V1.call('apply', VS.id));
+  await ok('TZ6: подрядчик видит анкету откликнувшегося', V2.call('workerPage', V1.id), (b) => b.worker.about === 'закрытое описание' && !('phone' in b.worker) && !('username' in b.worker) && !('tg_id' in b.worker));
+  await ok('TZ6: и в списке откликов', V2.call('applicants', VS.id), (b) => b[0].worker.name === 'Анкета' && !('phone' in b[0].worker));
+  await no('TZ6: другой подрядчик по прямой ссылке — нет', V3.call('workerPage', V1.id), 'not_found');
+  await no('TZ6: и отзывы тоже', V3.call('userReviews', V1.id, 'worker', 0), 'not_found');
+  await no('TZ6: и список откликов чужой смены', V3.call('applicants', VS.id), 'forbidden');
+  await ok('TZ6: теперь в избранное можно', V3.call('toggleFav', V2.id));
+  await ok('TZ6: избранное у подрядчика с откликом работает', V2.call('favorites', 'worker'), (b) => b.length === 1 && b[0].user_id === V1.id);
+  await ok('TZ6: исполнитель отзывает отклик без переписки', V1.call('withdraw', VA.id));
+  await no('TZ6: после отзыва анкеты нет', V2.call('workerPage', V1.id), 'not_found');
+  await ok('TZ6: и в избранном тоже', V2.call('favorites', 'worker'), (b) => b.length === 0);
+  // команда смены: исполнитель не получает фото и анкеты других исполнителей
+  const VA2 = await ok('TZ6: снова отклик', V1.call('apply', VS.id)); const VA3 = await ok('TZ6: отклик коллеги', V4.call('apply', VS.id));
+  await ok('TZ6: приняли', V2.call('decide', VA2.id, 'accepted')); await ok('TZ6: приняли коллегу', V2.call('decide', VA3.id, 'accepted'));
+  await ok('TZ6: коллега не получает чужое фото', V4.call('team', VS.id), (b) => b.members.find((m) => m.user_id === V1.id).avatar === null && b.members.find((m) => m.user_id === V4.id).avatar === wp.avatar);
+  await ok('TZ6: подрядчик видит фото команды', V2.call('team', VS.id), (b) => b.members.find((m) => m.user_id === V1.id).avatar === wp.avatar);
+  await no('TZ6: анкету коллеги по команде не открыть', V4.call('workerPage', V1.id), 'not_found');
+  await ok('TZ6: админ чата с правом на отклики — может', V2.call('setSenior', VS.id, V4.id, ['applications']));
+  await ok('TZ6: анкета откликнувшегося открывается', V4.call('workerPage', V1.id), (b) => b.worker.name === 'Анкета');
+  await ok('TZ6: чаты работают', V4.call('sendMessage', 'shift:' + VS.id, 'привет', key()));
+  // рейтинг: цифры есть, чужих имён, фото и ссылок нет
+  await ok('TZ6: в рейтинге чужие обезличены', V3.call('leaderboard', 'all'), (b) => b.top.length > 0 && b.top.every((x) => x.user_id === null && x.avatar === null && x.name === 'Исполнитель'));
+  await ok('TZ6: себя в рейтинге видно', W1.call('leaderboard', 'all'), (b) => b.top.some((x) => x.user_id === W1.id && x.name === 'Пётр') && b.top.filter((x) => x.user_id !== null).length === 1);
+  await ok('TZ6: администратору видны все', A.call('leaderboard', 'all'), (b) => b.top.every((x) => x.user_id !== null));
+
+  // ===== ТЗ: документы =====
+  for (const [doc, file] of [['terms', 'terms.html'], ['privacy', 'privacy.html'], ['additional', 'additional-data.html']]) {
+    const res = await fetch(ROOT + '/legal/' + file), html = await res.text();
+    check(`TZ7: ${file} открывается`, res.status === 200 && /text\/html/.test(res.headers.get('content-type')));
+    check(`TZ7: ${file} — страница для телефона`, html.includes('width=device-width'));
+    const row = (await db.query('select body, sha256, encode(sha256(convert_to(body, $2)), $3) as calc from legal_versions where doc = $1', [doc, 'UTF8', 'hex'])).rows[0];
+    check(`TZ7: ${doc}: сохранённый текст не изменён`, row && row.sha256 === row.calc);
+    const unescape = (t) => t.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const norm = (t) => t.replace(/\s+/g, '');
+    const shown = unescape(html.replace(/<head>[\s\S]*<\/head>/, '').replace(/<[^>]+>/g, ' '));
+    check(`TZ7: ${doc}: на странице тот же текст, что в базе`, norm(shown) === norm(row.body), norm(shown).slice(0, 80));
+  }
+  check('TZ7: документа №4 нет', fs.readdirSync(new URL('../../legal/', import.meta.url)).sort().join() === 'additional-data.html,privacy.html,terms.html' && !(await db.query("select 1 from legal_versions where doc not in ('terms', 'privacy', 'additional')")).rows.length);
+  await no('TZ7: опубликованный текст менять нельзя', db.query("update legal_versions set body = 'другое'").then(() => ({ status: 200, body: {} }), () => ({ status: 400, body: {} })));
 
   assert.equal(fail, 0, `Не прошло ${fail} из ${pass + fail}:\n  ✗ ${bugs.join('\n  ✗ ')}`);
   console.log(`Проверок пройдено: ${pass}`);

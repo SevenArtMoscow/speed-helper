@@ -4,17 +4,19 @@ import { CONFIG } from './config.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, openBot } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
-import { reportSheet, finishShift, shiftName, phoneSheet } from './screens-common.js';
+import { reportSheet, finishShift, shiftName, askPhone } from './screens-common.js';
 import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock, phoneStatus } from './screens-worker.js';
 
 const need = () => !S.user.roles.includes('contractor');
-const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Медкнижка', 'Самозанятость'];
+const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Самозанятость'];
 
 const shiftRow = (s, extra = '') => `<div class="card click" data-act="open" data-id="${s.id}"><div class="row sp"><b>${esc(s.title)}</b>${statusTag(s.status)}</div>
   <div class="mut sm">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}</div><div class="row sp sm" style="margin-top:6px"><span>👥 ${s.accepted_count} / ${s.people}</span>${s.ended && ['open', 'full'].includes(s.status) ? '<span class="tag o">Время прошло — завершите смену</span>' : ''}${s.pending_count ? `<span class="tag g">${s.pending_count} ${plural(s.pending_count, 'новый отклик', 'новых отклика', 'новых откликов')}</span>` : ''}</div>${extra}</div>`;
 
 async function home(ctx) {
   if (need()) return go('#/c/onboard');
+  // вернулись из бота с подтверждённым номером, а смена ждёт публикации — продолжаем её
+  if (S.user.draft_pending && S.user.phone_verified) return go('#/c/create');
   const load = async () => {
     const [st, list] = await Promise.all([api.contractorStats(), api.myShifts()]);
     const act = list.filter((s) => ['open', 'full'].includes(s.status)).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
@@ -99,32 +101,21 @@ export function parseShiftText(text) {
   return out;
 }
 
-// «ворота»: до подтверждения номера смену не создать (защита от спама и подставных подрядчиков)
-function phoneGate(ctx) {
-  ctx.render(`${pageHead('Новая смена')}<div class="card gate"><div class="gate-ic">${ICON.shield}</div><h2>Подтвердите номер телефона</h2>
-    <p class="mut">Чтобы публиковать смены, нужен подтверждённый номер. Это защита от спама и подставных аккаунтов — исполнители видят, что подрядчик настоящий. Займёт полминуты.</p>
-    ${S.cfg && S.cfg.phone_code ? `<p class="mut">Укажите номер — пришлём код ${S.cfg.phone_code === 'tg_gateway' ? 'в Telegram' : 'в SMS'}. Или подтвердите без кода через бота.</p>`
-      : '<ol class="gate-steps"><li>Нажмите кнопку ниже — откроется чат с ботом</li><li>Нажмите в чате «Поделиться номером» — это номер вашего Telegram</li><li>Вернитесь сюда — экран обновится сам</li></ol>'}
-    <button class="btn pri block" data-act="verify">Подтвердить номер</button>
-    <p class="mut sm" style="margin-top:10px">Номер используется только для защиты от дублей и спама и другим пользователям не показывается. Один номер — один аккаунт.</p></div>`);
-  ctx.acts.verify = () => phoneSheet(() => createOrEdit(ctx));
-  ctx.poll = async () => { if (S.user && S.user.phone_verified) { ctx.poll = null; createOrEdit(ctx); } };
-}
-
 async function createOrEdit(ctx, id) {
   const editing = !!id; id = Number(id);
   if (need()) return go('#/c/onboard');
-  if (!editing && !S.user.phone_verified) return phoneGate(ctx);   // публиковать смены можно только с подтверждённым номером
   const old = editing ? await api.getShift(id) : null;
   if (old && old.contractor_id !== S.user.id) return go('#/c/home');
-  const reqs = new Set(old ? old.requirements : []); const custom = (old ? old.requirements : []).filter((r) => !BASE_TAGS.includes(r));
-  let geo = old && old.lat != null ? { lat: old.lat, lng: old.lng, region: old.region } : null;
-  const reqId = uid(); // ключ идемпотентности: двойное нажатие «Создать» не создаст две смены
-  const d = old || {};
+  // черновик на сервере: без подтверждённого номера смену можно заполнить, а опубликовать — после подтверждения
+  const draft = editing ? null : await api.getShiftDraft();
+  const d = old || (draft && draft.form) || {};
+  const reqs = new Set(d.requirements || []); const custom = (d.requirements || []).filter((r) => !BASE_TAGS.includes(r));
+  let geo = d.lat != null ? { lat: d.lat, lng: d.lng, region: d.region } : null;
+  const reqId = (draft && draft.reqId) || uid(); // ключ идемпотентности: двойное нажатие «Создать» или возврат из бота не создадут две смены
   const lock = editing ? 'disabled' : '';
-  ctx.render(reqMark(`${pageHead(editing ? 'Изменить смену' : 'Новая смена')}${editing ? '<p class="mut sm">Можно менять оплату, количество людей, время, требования и описание. Для другого места или вида работ создайте новую смену.</p>' : '<button class="btn block ghost" data-act="ai">✨ Заполнить с ИИ-ассистентом</button>'}
+  ctx.render(reqMark(`${pageHead(editing ? 'Изменить смену' : 'Новая смена')}${editing ? '<p class="mut sm">Можно менять оплату, количество людей, время, требования и описание. Для другого места или вида работ создайте новую смену.</p>' : `${draft ? '<div class="card row sp"><span class="sm">Черновик восстановлен</span><a class="g sm" href="#" data-act="dropDraft">Очистить</a></div>' : ''}<button class="btn block ghost" data-act="ai">✨ Заполнить с ИИ-ассистентом</button>`}
     <label class="f">Название смены *</label><input class="i" id="title" value="${esc(d.title || '')}" placeholder="Например: Разгрузка мебели" ${lock}>
-    <label class="f">Категория *</label><select class="i" id="cat" ${lock}><option value="">Выберите…</option>${S.cats.map((c) => `<option value="${c.id}" ${d.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+    <label class="f">Категория *</label><select class="i" id="cat" ${lock}><option value="">Выберите…</option>${S.cats.map((c) => `<option value="${c.id}" ${String(d.category_id) === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
     <label class="f">Описание</label><textarea class="i" id="desc" placeholder="Что нужно делать">${esc(d.description || '')}</textarea>
     <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Начните вводить адрес и выберите его из подсказок'}</div>
     <div class="grid2"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
@@ -133,7 +124,7 @@ async function createOrEdit(ctx, id) {
     <label class="f">Как платите</label><div class="seg" id="pt"><span class="chip" data-act="pt" data-v="shift">За смену</span><span class="chip" data-act="pt" data-v="hour">В час</span></div>
     <label class="f" id="paylbl">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}"><p class="hint" id="payhint"></p>
     <label class="f">Требования</label><div class="row wrap gap" id="reqs"></div>
-    ${editing ? '' : `<div class="row sp" style="margin:14px 0"><span>Уведомить работников из избранного<div class="mut sm">Это не приглашение и не подтверждение</div></span>${toggle(false, 'tg', 'id="nf"')}</div>`}
+    ${editing ? '' : `<div class="row sp" style="margin:14px 0"><span>Уведомить работников из избранного<div class="mut sm">Это не приглашение и не подтверждение</div></span>${toggle(!!d.notify_favorites, 'tg', 'id="nf"')}</div>`}
     <button class="btn pri block" data-act="save" style="margin-top:14px">${editing ? 'Сохранить' : 'Опубликовать смену'}</button>`));
   const drawReqs = () => { document.getElementById('reqs').innerHTML = [...BASE_TAGS, ...custom].map((r) => `<span class="chip ${reqs.has(r) ? 'on' : ''}" data-act="req" data-r="${esc(r)}">${esc(r)}</span>`).join('') + '<span class="chip" data-act="addreq">＋ Своё</span>'; };
   drawReqs();
@@ -225,9 +216,26 @@ async function createOrEdit(ctx, id) {
       [$('date'), !!val('date') && val('date') >= todayISO(), val('date') ? 'Дата уже прошла' : 'Укажите дату'],
       ...timeChecks(),
     ])) return;
-    const s = await api.createShift({ title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), pay_type: ptype, until_done: ud(), region: geo.region, people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') }, reqId);
+    const form = { title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), pay_type: ptype, until_done: ud(), region: geo.region, people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') };
+    // номер ещё не подтверждён: сохраняем черновик и просим подтвердить; запрет публикации проверяет и сервер
+    if (!S.user.phone_verified) return holdForPhone(form);
+    let s;
+    try { s = await api.createShift(form, reqId); }
+    catch (e) { if (e.code === 'phone_unverified') { await refreshMe(); return holdForPhone(form); } throw e; }
+    S.user.draft_pending = false; publishing = false;
     track('shift_created', { id: s.id }); toast('Смена опубликована', 'ok'); go('#/c/shift/' + s.id);
   };
+  let publishing = false;
+  async function holdForPhone(form) {
+    await api.saveShiftDraft({ form, reqId, pending: true });
+    S.user.draft_pending = true; publishing = true;
+    askPhone('Смена сохранена как черновик. После подтверждения номера она опубликуется автоматически.');
+  }
+  // вернулись из бота: статус обновился сам (опрос в main.js), публикуем смену из того же черновика
+  if (!editing) ctx.poll = async () => { if (publishing && S.user.phone_verified) { publishing = false; toast('Номер подтверждён — публикуем смену'); await ctx.acts.save(); } };
+  ctx.acts.dropDraft = async () => { await api.deleteShiftDraft(); S.user.draft_pending = false; toast('Черновик очищен'); createOrEdit(ctx); };
+  // приложение закрывалось на время подтверждения: черновик ждёт публикации
+  if (draft && draft.pending) { if (S.user.phone_verified) { toast('Номер подтверждён — публикуем смену'); await ctx.acts.save(); } else publishing = true; }
 }
 
 // ---------- страница смены подрядчика ----------
@@ -297,7 +305,7 @@ async function profile(ctx) {
   const u = await refreshMe(), c = u.contractor, R = await api.userReviews(u.id, 'contractor', 0).catch(() => null);
   ctx.render(`${heroCard({ rev: ['contractor', u.id, c.reviews], pro: c.pro, av: c.avatar, name: c.name, verified: c.verified, sub: c.company ? esc(c.company) : '', tags: verifiedTag(c.verified, 'Проверенный подрядчик'),
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
-    ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}${infoRows([['phone', 'Телефон', esc(fmtPhone(c.phone))]])}
+    ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}
     ${phoneStatus(u, u.phone_verified ? 'можно публиковать смены' : 'публиковать смены')}
     ${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');

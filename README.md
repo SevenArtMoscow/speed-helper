@@ -16,6 +16,5 @@ Telegram Mini App для поиска краткосрочных смен и и�
    ```
    Скрипт ставит PostgreSQL, Node 22, nginx, HTTPS (Let's Encrypt), сервис `speedhelper`, защиту сервера (fail2ban, автообновления), ночные бэкапы БД с проверкой и мониторинг с оповещениями в Telegram.
 3. В @BotFather: `/mybots → Bot Settings → Configure Mini App → Enable` → URL `https://speedhelper.ru`.
-4. Заполнить `OPERATOR_NAME` и `OPERATOR_CONTACT` в `/opt/speedhelper/server/.env` (реквизиты оператора для политики конфиденциальности).
 
-Обновление, откат, бэкапы, мониторинг, замена секретов — [docs/OPERATIONS.md](docs/OPERATIONS.md). Что сделать перед запуском — [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md). Автотесты: `cd server && npm test`.
+Документы для пользователей: `/legal/terms.html`, `/legal/privacy.html`, `/legal/additional-data.html` (как обновить — в [docs/OPERATIONS.md](docs/OPERATIONS.md)). Обновление, откат, бэкапы, мониторинг, замена секретов — [docs/OPERATIONS.md](docs/OPERATIONS.md). Что сделать перед запуском — [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md). Автотесты: `cd server && npm test`.
