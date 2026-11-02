@@ -45,7 +45,7 @@ const TABS = {
 
 function shell() {
   app.innerHTML = `${MODE === 'local' ? '<div class="banner">Локальный режим: данные хранятся только в этом браузере</div>' : ''}
-    <div class="top">${logo()}<div class="sp"></div>${CONFIG.GAME_ENABLED ? '<button class="iconbtn gamebtn" data-act="game" id="gamebtn" aria-label="Игра Рейс" hidden>🚚</button>' : ''}<button class="iconbtn topbtn" data-act="top" id="topbtn" aria-label="Рейтинг исполнителей" hidden>${ICON.trophy}</button><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
+    <div class="top">${logo()}<div class="sp"></div>${CONFIG.GAME_ENABLED ? `<button class="iconbtn gamebtn" data-act="game" id="gamebtn" aria-label="Игра Рейс" hidden>${ICON.truck}</button>` : ''}<button class="iconbtn topbtn" data-act="top" id="topbtn" aria-label="Рейтинг исполнителей" hidden>${ICON.trophy}</button><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
     <main id="main"></main><nav class="tabs" id="tabs" hidden></nav>`;
   ctx.main = $('#main');
   app.addEventListener('click', async (e) => {

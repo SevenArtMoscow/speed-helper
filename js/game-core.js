@@ -5,8 +5,12 @@
 // ---------- настройки мира ----------
 export const LANE_W = 2.7;              // ширина полосы, м
 export const LANES = [-1, 0, 1];
-const LANE_TIME = 0.15;                 // перестроение на соседнюю полосу, с
-const JUMP_V = 10.4, GRAVITY = 25;      // прыжок: около 0,83 с в воздухе, высота 2,2 м
+const LANE_TIME = 0.15;                 // за это время машина почти доезжает до соседней полосы, с
+// перестроение — пружина с критическим затуханием: машина набирает ход и мягко встаёт на полосу, чем тяжелее, тем медленнее
+const LANE_RATE = { van: 26, gazel: 25, box: 24, dump: 23, fura: 22 };
+const JUMP_V = 10, GRAVITY_UP = 22, GRAVITY_DOWN = 30;   // прыжок: вверх мягче, вниз резче; 0,84 с в воздухе, высота 2,3 м
+const SPEED_RECOVER = 2.2;              // как быстро машина набирает ход после старта и после удара
+const START_K = 0.4, HIT_K = 0.55;      // доля скорости на старте и сразу после удара
 const DUCK_TIME = 0.75;                 // сколько машина остаётся присевшей, с
 const TRUCK_HALF = 1.4;                 // половина длины машины для столкновений, м
 const HIT_X = 1.2;                      // допуск по ширине: чуть задел на перестроении — не считается
@@ -15,9 +19,9 @@ const INVULN = 1.6;                     // неуязвимость после �
 export const MAX_SPEED = 38;            // самая высокая скорость в игре, м/с (сервер не принимает быстрее 45)
 
 export const ZONES = {
-  sklad: { name: 'Склад', icon: '📦' },
-  gorod: { name: 'Город', icon: '🏙️' },
-  trassa: { name: 'Трасса', icon: '🌙' },
+  sklad: { name: 'Склад' },
+  gorod: { name: 'Город' },
+  trassa: { name: 'Трасса' },
 };
 
 // ---------- уровни ----------
@@ -39,7 +43,7 @@ export const LEVELS = [
   lv(12, 'Дальнобой', 'trassa', 1400, [20, 25], [0.98, 0.85], 0.6, { full: 3, low: 2, gate: 2, moving: 3 }, 7, 150),
   lv(13, 'Перевал', 'trassa', 1600, [21, 26], [0.95, 0.82], 0.62, { full: 3, low: 3, gate: 2, moving: 3 }, 7, 170),
   lv(14, 'Без сна', 'trassa', 1800, [22, 28], [0.92, 0.78], 0.65, { full: 3, low: 3, gate: 3, moving: 3 }, 8, 200),
-  lv(15, 'Легенда дорог', 'trassa', 2200, [23, 30], [0.9, 0.75], 0.68, { full: 3, low: 3, gate: 3, moving: 4 }, 10, 300),
+  lv(15, 'Финальный рейс', 'trassa', 2200, [23, 30], [0.9, 0.75], 0.68, { full: 3, low: 3, gate: 3, moving: 4 }, 10, 300),
 ];
 export const levelById = (id) => LEVELS.find((l) => l.id === Number(id));
 export const ENDLESS = { mode: 'endless', name: 'Бесконечный рейс' };
@@ -47,11 +51,11 @@ export const ENDLESS = { mode: 'endless', name: 'Бесконечный рейс
 // ---------- машины, цвета, улучшения ----------
 // hearts — дополнительная прочность, coinBonus — надбавка к бонусам (её считает сервер), magnet — лишние секунды магнита
 export const TRUCKS = [
-  { id: 'van', name: 'Каблук', price: 0, hearts: 0, coinBonus: 0, magnet: 0, about: 'Первая машина. Маленькая, юркая, своя.' },
-  { id: 'gazel', name: 'Газелька', price: 1200, hearts: 0, coinBonus: 0.05, magnet: 0, about: 'Тентованный борт и +5% к бонусам.' },
-  { id: 'box', name: 'Будка', price: 3500, hearts: 1, coinBonus: 0.05, magnet: 0, about: 'Крепкий фургон: +1 к прочности и +5% к бонусам.' },
-  { id: 'dump', name: 'Самосвал', price: 8000, hearts: 1, coinBonus: 0.1, magnet: 1, about: 'Гружёный и злой: +1 к прочности, +10% к бонусам.' },
-  { id: 'fura', name: 'Фура', price: 16000, hearts: 1, coinBonus: 0.15, magnet: 2, about: 'Король дороги: +1 к прочности, +15% к бонусам, магнит дольше.' },
+  { id: 'van', name: 'Каблук', price: 0, hearts: 0, coinBonus: 0, magnet: 0, about: 'Базовая машина.' },
+  { id: 'gazel', name: 'Газелька', price: 1200, hearts: 0, coinBonus: 0.05, magnet: 0, about: '+5% к бонусам.' },
+  { id: 'box', name: 'Будка', price: 3500, hearts: 1, coinBonus: 0.05, magnet: 0, about: '+1 к прочности, +5% к бонусам.' },
+  { id: 'dump', name: 'Самосвал', price: 8000, hearts: 1, coinBonus: 0.1, magnet: 1, about: '+1 к прочности, +10% к бонусам, магнит на 1 с дольше.' },
+  { id: 'fura', name: 'Фура', price: 16000, hearts: 1, coinBonus: 0.15, magnet: 2, about: '+1 к прочности, +15% к бонусам, магнит на 2 с дольше.' },
 ];
 export const truckById = (id) => TRUCKS.find((t) => t.id === id) || TRUCKS[0];
 export const PAINTS = [
@@ -127,8 +131,9 @@ export class Course {
     this.len = level ? level.len : Infinity;
     if (level) {
       this.cargoAt = Array.from({ length: level.cargo }, (_, i) => ((i + 1) / (level.cargo + 1)) * (level.len - 60) + 40);
-      const T = { lanes: [[12, 'Свайп влево и вправо — смена полосы'], [60, 'Собирай молнии и коробки']], jump: [[25, 'Свайп вверх — прыжок через низкие препятствия']], duck: [[25, 'Свайп вниз — пригнуться под шлагбаумом']], moving: [[25, 'Встречные едут быстрее: перестраивайся заранее']] }[level.tip];
-      if (T) this.tips = T.map(([z, text]) => ({ z, text }));
+      // текст подсказки выбирает экран: на телефоне и на компьютере управление разное
+      const T = { lanes: [[12, 'lanes'], [60, 'collect']], jump: [[25, 'jump']], duck: [[25, 'duck']], moving: [[25, 'moving']] }[level.tip];
+      if (T) this.tips = T.map(([z, id]) => ({ z, id }));
     } else this.cargoAt = [];
     this.nextCargoEndless = 150;
     this.built = 0;
@@ -212,43 +217,49 @@ export class Run {
   constructor({ seed, level = null, truck = 'van', upgrades = {} }) {
     const t = truckById(truck);
     this.course = new Course(seed, level); this.level = level; this.truck = t; this.upgrades = upgrades;
-    this.z = 0; this.t = 0; this.lane = 0; this.x = 0; this.y = 0; this.vy = 0; this.duck = 0; this.jumpBuf = 0;
-    this.maxHearts = (level ? 3 : 1) + t.hearts; this.hearts = this.maxHearts; this.invuln = 0; this.slow = 0;
+    this.z = 0; this.t = 0; this.lane = 0; this.x = 0; this.vx = 0; this.y = 0; this.vy = 0; this.duck = 0; this.jumpBuf = 0;
+    this.px = 0; this.py = 0; this.pz = 0;   // положение на прошлом шаге: кадр рисуется между шагами, поэтому движение ровное на любой частоте экрана
+    this.laneRate = LANE_RATE[t.id] || 24; this.speedK = START_K;
+    this.maxHearts = (level ? 3 : 1) + t.hearts; this.hearts = this.maxHearts; this.invuln = 0;
     this.coins = 0; this.value = 0; this.cargo = 0; this.hits = 0; this.jumps = 0; this.ducks = 0;
     this.power = { magnet: 0, shield: 0, x2: 0 };
     this.done = false; this.completed = false; this.events = [];
     this.iOb = 0; this.iIt = 0;
     this.course.ensure(160);
   }
-  get speed() { return this.course.speedAt(this.z) * (this.slow > 0 ? 0.72 : 1); }
+  get speed() { return this.course.speedAt(this.z) * this.speedK; }
   get grounded() { return this.y <= 0 && this.vy <= 0; }
   get distance() { return Math.floor(this.z); }
   get progress() { return this.level ? Math.min(1, this.z / this.level.len) : 0; }
   input(a) {
     if (this.done) return;
-    if (a === 'left' && this.lane > -1) { this.lane--; this.events.push({ t: 'lane' }); }
-    if (a === 'right' && this.lane < 1) { this.lane++; this.events.push({ t: 'lane' }); }
+    if (a === 'left' || a === 'right') {
+      const d = a === 'left' ? -1 : 1;
+      if (this.lane + d >= -1 && this.lane + d <= 1) { this.lane += d; this.events.push({ t: 'lane', d }); }
+      else { this.vx += d * 7; this.events.push({ t: 'edge', d }); }   // край дороги: машина чуть дёргается и возвращается
+    }
     if (a === 'up') { this.duck = 0; if (this.grounded) this.jump(); else this.jumpBuf = 0.14; }
     if (a === 'down') { if (this.grounded) { if (this.duck <= 0) { this.ducks++; this.events.push({ t: 'duck' }); } this.duck = DUCK_TIME; } else { this.vy = -16; this.duck = DUCK_TIME; this.ducks++; } this.jumpBuf = 0; }
   }
   jump() { this.vy = JUMP_V; this.y = 0.001; this.jumps++; this.events.push({ t: 'jump' }); }
   step(dt) {
     if (this.done) return;
+    this.px = this.x; this.py = this.y; this.pz = this.z;
     this.t += dt;
+    this.speedK += (1 - this.speedK) * (1 - Math.exp(-SPEED_RECOVER * dt));
     this.z += this.speed * dt;
     if (!this.level) this.course.ensure(this.z + 160); else this.course.ensure(this.z + 200);
     // перестроение
-    const tx = this.lane * LANE_W, mv = (LANE_W / LANE_TIME) * dt, dx = tx - this.x;
-    this.x += Math.abs(dx) <= mv ? dx : Math.sign(dx) * mv;
+    const w = this.laneRate, e = Math.exp(-w * dt), d = this.x - this.lane * LANE_W, k = (this.vx + w * d) * dt;
+    this.vx = (this.vx - w * k) * e; this.x = this.lane * LANE_W + (d + k) * e;
     // прыжок и приседание
     if (this.y > 0 || this.vy > 0) {
-      this.vy -= GRAVITY * dt; this.y += this.vy * dt;
-      if (this.y <= 0) { this.y = 0; this.vy = 0; this.events.push({ t: 'land' }); if (this.jumpBuf > 0) { this.jump(); this.jumpBuf = 0; } }
+      this.vy -= (this.vy > 0 ? GRAVITY_UP : GRAVITY_DOWN) * dt; this.y += this.vy * dt;
+      if (this.y <= 0) { const v = -this.vy; this.y = 0; this.vy = 0; this.events.push({ t: 'land', v }); if (this.jumpBuf > 0) { this.jump(); this.jumpBuf = 0; } }
     }
     if (this.duck > 0) this.duck -= dt;
     if (this.jumpBuf > 0) this.jumpBuf -= dt;
     if (this.invuln > 0) this.invuln -= dt;
-    if (this.slow > 0) this.slow -= dt;
     for (const k in this.power) if (this.power[k] > 0) this.power[k] = Math.max(0, this.power[k] - dt);
     this.collide(); this.collect();
     if (this.level && this.z >= this.level.len) this.finish(true);
@@ -265,7 +276,7 @@ export class Run {
       if (this.invuln > 0) continue;
       o.gone = true;
       if (this.power.shield > 0) { this.power.shield = 0; this.invuln = 0.6; this.events.push({ t: 'smash', o }); continue; }
-      this.hits++; this.hearts--; this.invuln = INVULN; this.slow = 0.9;
+      this.hits++; this.hearts--; this.invuln = INVULN; this.speedK = Math.min(this.speedK, HIT_K);
       this.events.push({ t: 'hit', o });
       if (this.hearts <= 0) { this.finish(false); return; }
     }
@@ -299,7 +310,7 @@ export class Run {
   // итог заезда для сервера
   stats() { return { distance: this.distance, coins: this.value, cargo: this.cargo, hits: this.hits, jumps: this.jumps, ducks: this.ducks, completed: this.completed }; }
   // где встречная машина выглядит прямо сейчас: столкновение считается в точке o.z, поэтому честность ряда не меняется
-  visualZ(o) { return o.oncoming ? o.z + (o.z - this.z) * (o.oncoming / Math.max(8, this.speed)) : o.z; }
+  visualZ(o, z = this.z) { return o.oncoming ? o.z + (o.z - z) * (o.oncoming / Math.max(8, this.course.speedAt(z))) : o.z; }
 }
 
 // ---------- проверка честности (для автотестов): есть ли путь через весь маршрут ----------
