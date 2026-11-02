@@ -1,5 +1,6 @@
 * text=auto
 *.sh text eol=lf
+js/three.game.min.js -text
 # точный текст юридических документов: контрольная сумма считается с переводами строк LF
 supabase/migrations/022_legal_docs.sql text eol=lf
 *.png binary

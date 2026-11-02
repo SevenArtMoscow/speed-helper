@@ -1,0 +1,2 @@
+// Какие части three.js нужны игре. Сборка и обновление — docs/GAME.md
+export { AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color, ConeGeometry, CylinderGeometry, DirectionalLight, DoubleSide, DynamicDrawUsage, Euler, ExtrudeGeometry, Fog, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial, Object3D, PerspectiveCamera, PlaneGeometry, Quaternion, RepeatWrapping, SRGBColorSpace, Scene, Shape, SphereGeometry, TorusGeometry, Vector2, Vector3, WebGLRenderer } from 'three';
