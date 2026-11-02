@@ -51,6 +51,7 @@ export const ICON = {
   user: svg('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.5-3.6 3.4-5.6 7-5.6s6.5 2 7 5.6"/>'),
   work: svg('<rect x="3.5" y="7.5" width="17" height="12.5" rx="2.8"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3.5 13.2h17"/>'),
   car: svg('<path d="M4.5 16v-5l2.1-5h10.8l2.1 5v5"/><path d="M3.5 16h17M7.5 16v2.5M16.5 16v2.5M4.5 11h15"/>'),
+  truck: svg('<path d="M2.5 6.5h11v10h-11z"/><path d="M13.5 10h4l3.5 3.5v3h-7.5"/><circle cx="7" cy="17.5" r="1.9"/><circle cx="17" cy="17.5" r="1.9"/>'),
   heart: svg('<path d="M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0 1 12 7.2a4.2 4.2 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/>'),
   moon: svg('<path d="M20 14.6A8 8 0 1 1 9.4 4a6.4 6.4 0 0 0 10.6 10.6z"/>'),
   bolt: svg('<path d="M13 2.8 5 13.6h6l-1 7.6 8-10.8h-6z"/>'),
