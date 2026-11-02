@@ -2,6 +2,7 @@
 // Нужен для разработки/проверки без Supabase. В нём НЕТ демо-смен: база пустая, пока пользователи сами не создадут данные.
 import { CONFIG } from './config.js';
 import { dist, isWeekend, todayISO, addDays, uid } from './util.js';
+import { TRUCKS, PAINTS, UPGRADE_COST, QUESTS, MILESTONES, DAILY_BONUS, DAILY_CAP, levelOfXp, levelById, truckById } from './game-core.js';
 
 const KEY = 'sh_local_db_v1';
 const DEFAULT_CATEGORIES = ['Грузчики', 'Разнорабочие', 'Склад / комплектация', 'Уборка', 'Погрузка / разгрузка', 'Курьеры', 'Промоутеры', 'Официанты / кухня', 'Монтаж / стройка', 'Прочее'];
@@ -176,6 +177,34 @@ const API = {
     if (!u.roles.includes('contractor')) u.roles.push('contractor');
     return API.me(me);
   },
+
+  // ----- игра «Рейс» (на сервере — миграция 024) -----
+  gameState(me) { return gameView(me); },
+  gameStart(me, o = {}) {
+    const g = gameOf(me); if (!o.endless && !levelById(o.level)) fail('not_found', 'Такого рейса нет');
+    if (o.level > 1 && !g.stars[o.level - 1]) fail('forbidden', 'Сначала пройдите предыдущий рейс');
+    const r = { run_id: id(), seed: Math.floor(Math.random() * 2147483647), level: o.endless ? null : o.level }; g.run = r; return r;
+  },
+  gameFinish(me, runId, s = {}) {
+    const g = gameOf(me), L = levelById(g.run && g.run.level), day = gameDay(g);
+    const completed = !!(L && s.completed), stars = completed ? 1 + (s.cargo >= L.cargo ? 1 : 0) + (s.hits === 0 ? 1 : 0) : 0, old = L ? g.stars[L.id] || 0 : 0, fresh = Math.max(0, stars - old);
+    const raw = Math.floor(s.coins * (1 + truckById(g.truck).coinBonus)) + (L ? fresh * L.reward : Math.floor(s.distance / 50)), earned = Math.min(raw, Math.max(0, DAILY_CAP - day.earned));
+    const xp = Math.floor(s.distance / 10) + fresh * 25 + (completed ? 10 : 0), before = levelOfXp(g.xp), after = levelOfXp(g.xp + xp); let bonus = 0; for (let i = before + 1; i <= after; i++) bonus += 50 * i;
+    g.coins += earned + bonus; g.xp += xp; g.total_distance += s.distance; g.total_runs++; if (L && stars > old) g.stars[L.id] = stars; if (!L) g.best_endless = Math.max(g.best_endless, s.distance);
+    day.earned += earned; const P = day.progress, add = (k, v) => { P[k] = (P[k] || 0) + (v || 0); };
+    add('distance', s.distance); add('coins', s.coins); add('cargo', s.cargo); add('runs', 1); add('jumps', s.jumps); add('ducks', s.ducks); add('clean', completed && s.hits === 0 ? 1 : 0);
+    return { earned, capped: earned < raw, xp, completed, stars, new_stars: fresh, best: g.best_endless, level_before: before, level_after: after, level_bonus: bonus, distance: s.distance, cargo: s.cargo, hits: s.hits, state: gameView(me) };
+  },
+  gameBuy(me, { kind, id: item }) {
+    const g = gameOf(me), x = (kind === 'truck' ? TRUCKS : PAINTS).find((i) => i.id === item); if (!x) fail('not_found', 'Такого нет в гараже');
+    if (g.coins < x.price) fail('invalid', 'Не хватает бонусов'); g.coins -= x.price;
+    if (kind === 'truck') { g.trucks.push(item); g.truck = item; } else { g.paints.push(item); g.paint = item; } return gameView(me);
+  },
+  gameSelect(me, { kind, id: item }) { const g = gameOf(me); if (kind === 'truck') g.truck = item; else g.paint = item; return gameView(me); },
+  gameUpgrade(me, item) { const g = gameOf(me), l = g.upgrades[item] || 0; if (l >= UPGRADE_COST.length) fail('conflict', 'Улучшение уже на максимуме'); if (g.coins < UPGRADE_COST[l]) fail('invalid', 'Не хватает бонусов'); g.coins -= UPGRADE_COST[l]; g.upgrades[item] = l + 1; return gameView(me); },
+  gameClaimQuest(me, qid) { const g = gameOf(me), d = gameDay(g), q = QUESTS.find((x) => x.id === qid); if ((d.progress[q.type] || 0) < q.target) fail('invalid', 'Задание ещё не выполнено'); if (d.claimed.includes(qid)) fail('conflict', 'Награда уже получена'); d.claimed.push(qid); g.coins += q.reward; return gameView(me); },
+  gameClaimMilestone(me, mid) { const g = gameOf(me), m = MILESTONES.find((x) => x.id === mid); if (gameProgress(g, m.type) < m.target) fail('invalid', 'Достижение ещё не выполнено'); if (g.milestones.includes(mid)) fail('conflict', 'Награда уже получена'); g.milestones.push(mid); g.coins += m.reward; return gameView(me); },
+  gameDailyBonus(me) { const g = gameOf(me), t = todayISO(); if (g.last_bonus === t) fail('conflict', 'Сегодняшний бонус уже получен'); const amount = gameNext(g); g.streak = g.last_bonus === addDays(t, -1) ? g.streak + 1 : 1; g.last_bonus = t; g.coins += amount; return { ...gameView(me), got: amount }; },
 
   // ----- поиск смен -----
   feed(me, f = {}) {
@@ -535,6 +564,17 @@ const API = {
   adminAudit(me) { admin(me); return [...db.audit].reverse().slice(0, 100); },
 };
 
+function gameOf(me) { db.game = db.game || {}; return db.game[me] || (db.game[me] = { coins: 0, xp: 0, truck: 'van', paint: 'green', trucks: ['van'], paints: ['green'], upgrades: {}, stars: {}, best_endless: 0, total_distance: 0, total_runs: 0, streak: 0, last_bonus: null, milestones: [], days: {} }); }
+function gameDay(g) { const t = todayISO(); return g.days[t] || (g.days[t] = { progress: {}, claimed: [], earned: 0 }); }
+const gameNext = (g) => DAILY_BONUS[Math.min(g.last_bonus === addDays(todayISO(), -1) ? g.streak : 0, 6)];
+const gameProgress = (g, type) => ({ total_distance: g.total_distance, total_stars: Object.values(g.stars).reduce((s, n) => s + n, 0), trucks: g.trucks.length, level: levelOfXp(g.xp), best_endless: g.best_endless }[type] || 0);
+function gameView(me) {
+  const g = gameOf(me), d = gameDay(g), pick = (grp) => { const l = QUESTS.filter((q) => q.group === grp); return l[new Date().getDate() % l.length]; };
+  return { coins: g.coins, xp: g.xp, level: levelOfXp(g.xp), truck: g.truck, paint: g.paint, trucks: g.trucks, paints: g.paints, upgrades: g.upgrades, stars: g.stars, best_endless: g.best_endless, total_distance: g.total_distance, total_runs: g.total_runs, earned_today: d.earned,
+    bonus: { available: g.last_bonus !== todayISO(), streak: g.streak, next: gameNext(g) },
+    quests: ['distance', 'collect', 'skill'].map(pick).map((q) => ({ id: q.id, progress: Math.min(d.progress[q.type] || 0, q.target), claimed: d.claimed.includes(q.id) })),
+    milestones: MILESTONES.map((m) => ({ id: m.id, progress: Math.min(gameProgress(g, m.type), m.target), claimed: g.milestones.includes(m.id) })) };
+}
 function admin(me) { const u = actor(me); if (!u.is_admin) fail('forbidden', 'Нет доступа'); }
 function assertChat(me, scope) {
   if (scope.startsWith('shift:')) { if (!db.members.some((m) => m.shift_id === Number(scope.slice(6)) && m.user_id === me)) fail('forbidden', 'Вы не в команде смены'); return; }

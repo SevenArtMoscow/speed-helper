@@ -6,6 +6,7 @@ import { pickLocation, geocode, attachSuggest } from './maps.js';
 import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
 import { reportSheet, finishShift, shiftName, askPhone } from './screens-common.js';
 import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock, phoneStatus } from './screens-worker.js';
+import { gameBanner } from './screens-game.js';
 
 const need = () => !S.user.roles.includes('contractor');
 const BASE_TAGS = ['18+', 'Опыт склада', 'Права категории B', 'Самозанятость'];
@@ -22,7 +23,7 @@ async function home(ctx) {
     const act = list.filter((s) => ['open', 'full'].includes(s.status)).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     const html = `<h1>Главная</h1><div class="grid2" style="margin:10px 0"><button class="stat" data-act="go" data-to="#/c/shifts/act"><b>${st.active}</b>Активные смены</button><button class="stat" data-act="go" data-to="#/c/shifts/new"><b>${st.new_applications}</b>Новые отклики</button><button class="stat" data-act="go" data-to="#/c/workers"><b>${st.workers}</b>Исполнители</button><button class="stat o" data-act="go" data-to="#/c/shifts/done"><b>${st.done}</b>Завершённые</button></div>
       <button class="btn pri block" data-act="create" style="padding:15px">＋ Опубликовать смену</button>
-      <button class="btn block" data-act="go" data-to="#/c/fav" style="margin-top:8px">★ Избранные исполнители</button>
+      <button class="btn block" data-act="go" data-to="#/c/fav" style="margin-top:8px">★ Избранные исполнители</button>${CONFIG.GAME_ENABLED ? gameBanner() : ''}
       <h2>Открытые смены</h2>${act.length ? act.slice(0, 20).map((s) => shiftRow(s)).join('') : `<div class="empty"><h2>У вас пока нет открытых смен.</h2></div>`}`;
     if (ctx.main.dataset.h !== html) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }
   };
@@ -307,7 +308,7 @@ async function profile(ctx) {
       stats: [[c.rating == null ? '—' : c.rating.toFixed(1) + ' <small class="star">★</small>', c.reviews ? `${c.reviews} ${plural(c.reviews, 'отзыв', 'отзыва', 'отзывов')}` : 'нет оценок'], [c.shifts_done, plural(c.shifts_done, 'смена', 'смены', 'смен')], [esc(c.city || '—'), 'город']] })}
     ${c.about ? `<div class="about">${esc(c.about)}</div>` : ''}
     ${phoneStatus(u, u.phone_verified ? 'можно публиковать смены' : 'публиковать смены')}
-    ${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+    ${CONFIG.GAME_ENABLED ? gameBanner() : ''}${proCard(u)}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'contractor', u.id)}<button class="btn block" data-act="edit" style="margin-top:6px">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/c/edit-profile');
   ctx.poll = async () => { if (!u.phone_verified && S.user.phone_verified) profile(ctx); };   // подтвердили в боте — обновляем статус
 }

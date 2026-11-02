@@ -6,6 +6,7 @@ import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, empty
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
 import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce } from './util.js';
 import { reportSheet, shiftName, openLegal, openSupport, startPhoneCheck, LEGAL_TITLE, extraDataSheet } from './screens-common.js';
+import { gameBanner } from './screens-game.js';
 
 const FKEY = 'sh_filters_v1';
 const defFilters = () => ({ date: 'any', min_pay: 0, geo: 'any', categories: [] });
@@ -269,7 +270,7 @@ async function mine(ctx) {
   let data = [];
   const draw = () => {
     const cur = TABS.find((t) => t[0] === tab); const list = data.filter((a) => cur[2].includes(a.status));
-    const html = `<h1>Мои смены</h1><div class="tabsx">${TABS.map(([k, t, st]) => { const n = data.filter((a) => st.includes(a.status)).length; return `<span class="chip ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t}${n ? ` · ${n}` : ''}</span>`; }).join('')}</div>` +
+    const html = `<h1>Мои смены</h1>${CONFIG.GAME_ENABLED ? gameBanner() : ''}<div class="tabsx">${TABS.map(([k, t, st]) => { const n = data.filter((a) => st.includes(a.status)).length; return `<span class="chip ${tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${t}${n ? ` · ${n}` : ''}</span>`; }).join('')}</div>` +
       (list.length ? list.map((a) => `<div class="card click" data-act="open" data-id="${a.shift.id}" data-st="${a.status}"><div class="row sp"><b>${esc(a.shift.title)}</b>${statusTag(a.status)}</div><div class="mut sm">${esc(dateLabel(a.shift.date))} · ${esc(timeRange(a.shift))} · ${esc(payLabel(a.shift))}</div><div class="sm">${esc(a.shift.contractor.company || a.shift.contractor.name)}</div>
         ${a.status === 'accepted' ? `<div class="row gap" style="margin-top:8px"><button class="btn pri sm grow" data-act="team" data-id="${a.shift.id}">Команда</button><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button><button class="btn danger sm" data-act="leave" data-app="${a.id}">Отказаться</button></div>` : ''}
         ${a.status === 'pending' ? `<div class="row gap" style="margin-top:8px"><button class="btn sm grow" data-act="dm" data-app="${a.id}">Написать</button><button class="btn danger sm" data-act="leave" data-app="${a.id}">Отозвать</button></div>` : ''}
@@ -385,7 +386,7 @@ async function profile(ctx) {
   ctx.render(`${profileBlock(w, true)}${phoneStatus(u)}
     <div class="card prog"><div class="row">${ring(w.percent, 64)}<div class="grow"><b>Профиль заполнен на ${w.percent}%</b><div class="mut sm">${ok ? 'У вас статус «Проверенный исполнитель»' : `Ещё ${CONFIG.MIN_VERIFIED_PERCENT - w.percent}% до статуса «Проверенный»`}</div></div></div>
     ${todoList(w)}</div>
-    ${proCard(u)}${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
+    ${CONFIG.GAME_ENABLED ? gameBanner() : ''}${proCard(u)}${active}${reviewsBlock(R ? R.items.slice(0, 5) : [], R ? R.total : 0, 'worker', u.id)}<button class="btn block" data-act="toTop"  style="margin-top:12px">${ICON.trophy}Рейтинг исполнителей</button><div style="height:8px"></div><button class="btn block" data-act="edit">${ICON.edit}Редактировать профиль</button><div style="height:8px"></div>${roleSwitch()}${devPanel(u)}${helpBlock()}`);
   bindCommonProfile(ctx, u); bindReviews(ctx); ctx.acts.edit = () => go('#/w/edit'); ctx.acts.toTop = () => go('#/w/top'); ctx.acts.openShift = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.poll = async () => { if (!u.phone_verified && S.user.phone_verified) profile(ctx); };   // подтвердили в боте — обновляем статус
 }

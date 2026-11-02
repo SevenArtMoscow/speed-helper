@@ -3,10 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import fs from 'node:fs';
 import http from 'node:http';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
+import * as GC from '../../js/game-core.js';
 
 const TOKEN = '123456:TEST_ONLY', PORT = 3199, DBPORT = 54329, SMSPORT = 3198, AGENT_TG = 777000;
 // подставной sms.ru: запоминает отправленные коды; на номер 9990000000 отвечает ошибкой
@@ -831,6 +833,99 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('TZ6: в рейтинге чужие обезличены', V3.call('leaderboard', 'all'), (b) => b.top.length > 0 && b.top.every((x) => x.user_id === null && x.avatar === null && x.name === 'Исполнитель'));
   await ok('TZ6: себя в рейтинге видно', W1.call('leaderboard', 'all'), (b) => b.top.some((x) => x.user_id === W1.id && x.name === 'Пётр') && b.top.filter((x) => x.user_id !== null).length === 1);
   await ok('TZ6: администратору видны все', A.call('leaderboard', 'all'), (b) => b.top.every((x) => x.user_id !== null));
+
+  // ===== игра «Рейс»: прогресс на аккаунте, начисляет только сервер =====
+  const G = await login(9501, 'Игрок'), G2 = await login(9502, 'Другой игрок');
+  const cat = (await db.query('select _game_catalog() as c')).rows[0].c;
+  // цены и уровни на сервере и в приложении совпадают
+  check('GAME: уровни совпадают с приложением', isDeepStrictEqual(cat.levels, GC.LEVELS.map(({ id, zone, len, cargo, reward }) => ({ id, zone, len, cargo, reward }))));
+  check('GAME: машины совпадают', isDeepStrictEqual(cat.trucks, GC.TRUCKS.map(({ id, price, coinBonus }) => ({ id, price, coinBonus }))));
+  check('GAME: цвета совпадают', isDeepStrictEqual(cat.paints, GC.PAINTS.map(({ id, price }) => ({ id, price }))));
+  check('GAME: улучшения совпадают', JSON.stringify(cat.upgradeCost) === JSON.stringify(GC.UPGRADE_COST) && JSON.stringify(cat.upgrades) === JSON.stringify(GC.UPGRADES.map((u) => u.id)));
+  check('GAME: задания совпадают', isDeepStrictEqual(cat.quests, GC.QUESTS.map(({ id, group, type, target, reward }) => ({ id, group, type, target, reward }))));
+  check('GAME: достижения совпадают', isDeepStrictEqual(cat.milestones, GC.MILESTONES.map(({ id, type, target, reward }) => ({ id, type, target, reward }))));
+  check('GAME: ежедневный бонус и потолок совпадают', JSON.stringify(cat.dailyBonus) === JSON.stringify(GC.DAILY_BONUS) && cat.dailyCap === GC.DAILY_CAP);
+  const lvlSql = (await db.query('select x, _game_level(x::bigint) as l from generate_series(0, 20000, 37) x')).rows;
+  check('GAME: формула уровня совпадает', lvlSql.every((r) => r.l === GC.levelOfXp(r.x)));
+
+  const G0 = await login(9503, 'Без условий', true, { fresh: true });
+  await no('GAME: без принятия условий играть нельзя', G0.call('gameState'), 'terms_required');
+  await ok('GAME: новый игрок', G.call('gameState'), (b) => b.coins === 0 && b.level === 1 && b.truck === 'van' && b.paint === 'green' && b.trucks[0] === 'van' && b.quests.length === 3 && b.bonus.available === true && b.bonus.next === 20 && b.milestones.length === GC.MILESTONES.length);
+  await no('GAME: второй рейс закрыт', G.call('gameStart', { level: 2 }), 'forbidden');
+  await no('GAME: несуществующий рейс', G.call('gameStart', { level: 99 }), 'not_found');
+  const backdate = (id, sec) => db.query("update game_runs set started_at = now() - ($2 || ' seconds')::interval where id = $1", [id, sec]);
+  const R1a = await ok('GAME: старт первого рейса', G.call('gameStart', { level: 1 }), (b) => b.run_id > 0 && Number.isInteger(b.seed) && b.level === 1);
+  // накрутка: мгновенный проезд, лишние бонусы и коробки не принимаются
+  await no('GAME: мгновенный проезд не принимается', G.call('gameFinish', R1a.run_id, { distance: 450, coins: 100, cargo: 3, hits: 0, completed: true }), 'invalid');
+  await backdate(R1a.run_id, 60);
+  await no('GAME: бонусов больше, чем бывает на маршруте', G.call('gameFinish', R1a.run_id, { distance: 450, coins: 100000, cargo: 3, hits: 0, completed: true }), 'invalid');
+  await no('GAME: коробок больше, чем на маршруте', G.call('gameFinish', R1a.run_id, { distance: 450, coins: 100, cargo: 40, hits: 0, completed: true }), 'invalid');
+  await no('GAME: чужой заезд', G2.call('gameFinish', R1a.run_id, { distance: 450, coins: 100, cargo: 3, hits: 0, completed: true }), 'not_found');
+  await ok('GAME: не доехал — звёзд нет', G.call('gameFinish', R1a.run_id, { distance: 200, coins: 50, cargo: 1, hits: 3, completed: true }), (b) => b.completed === false && b.stars === 0 && b.earned === 50 && b.state.stars['1'] === undefined);
+  await ok('GAME: повтор результата не начисляет', G.call('gameFinish', R1a.run_id, { distance: 200, coins: 50, cargo: 1, hits: 3, completed: false }), (b) => b.earned === 50 && b.state.coins === 50);
+  const R1b = await ok('GAME: снова первый рейс', G.call('gameStart', { level: 1 })); await backdate(R1b.run_id, 60);
+  const L1 = GC.LEVELS[0];
+  await ok('GAME: две звезды: дошёл и собрал коробки, но с ударом', G.call('gameFinish', R1b.run_id, { distance: L1.len, coins: 100, cargo: L1.cargo, hits: 1, completed: true }), (b) => b.stars === 2 && b.new_stars === 2 && b.earned === 100 + 2 * L1.reward && b.state.stars['1'] === 2);
+  await ok('GAME: второй рейс открылся', G.call('gameStart', { level: 2 }));
+  const R1c = await ok('GAME: ещё раз первый', G.call('gameStart', { level: 1 })); await backdate(R1c.run_id, 60);
+  await ok('GAME: третья звезда — награда только за новую', G.call('gameFinish', R1c.run_id, { distance: L1.len, coins: 10, cargo: L1.cargo, hits: 0, completed: true }), (b) => b.stars === 3 && b.new_stars === 1 && b.earned === 10 + L1.reward && b.state.stars['1'] === 3);
+  const R1d = await ok('GAME: и ещё', G.call('gameStart', { level: 1 })); await backdate(R1d.run_id, 60);
+  await ok('GAME: плохой заезд не снижает звёзды', G.call('gameFinish', R1d.run_id, { distance: L1.len, coins: 0, cargo: 0, hits: 2, completed: true }), (b) => b.stars === 1 && b.new_stars === 0 && b.earned === 0 && b.state.stars['1'] === 3);
+  // бесконечный рейс и опыт
+  const E1R = await ok('GAME: бесконечный рейс', G.call('gameStart', { endless: true }), (b) => b.level === null); await backdate(E1R.run_id, 200);
+  await ok('GAME: рекорд и бонусы за расстояние', G.call('gameFinish', E1R.run_id, { distance: 2000, coins: 200, cargo: 3, hits: 1, jumps: 20, ducks: 10, completed: true }), (b) => b.completed === false && b.best === 2000 && b.earned === 200 + 40 && b.state.best_endless === 2000 && b.xp === 200);
+  const st1 = (await G.call('gameState')).body;
+  check('GAME: уровень вырос и дал бонус', st1.level === GC.levelOfXp(st1.xp) && st1.level >= 2, JSON.stringify(st1).slice(0, 120));
+  // ежедневный бонус и серия
+  await ok('GAME: ежедневный бонус', G.call('gameDailyBonus'), (b) => b.got === 20 && b.bonus.available === false && b.bonus.streak === 1);
+  await no('GAME: второй раз за день нельзя', G.call('gameDailyBonus'), 'conflict');
+  await db.query("update game_profiles set last_bonus = current_date - 1, streak = 3 where user_id = $1", [G.id]);
+  await ok('GAME: серия растёт', G.call('gameDailyBonus'), (b) => b.got === 60 && b.bonus.streak === 4);
+  await db.query("update game_profiles set last_bonus = current_date - 3, streak = 5 where user_id = $1", [G.id]);
+  await ok('GAME: пропуск сбрасывает серию', G.call('gameDailyBonus'), (b) => b.got === 20 && b.bonus.streak === 1);
+  // задания
+  await ok('GAME: задания на сегодня одинаковые у всех', Promise.all([G.call('gameState'), G2.call('gameState')]).then(([a, b]) => ({ status: 200, body: a.body.quests.map((q) => q.id).join() === b.body.quests.map((q) => q.id).join() })), (b) => b === true);
+  const today = (await G.call('gameState')).body.quests, undone = (await G2.call('gameState')).body.quests;
+  check('GAME: задание из каждой группы', new Set(today.map((q) => GC.questById(q.id).group)).size === 3);
+  await no('GAME: награду без выполнения не получить', G2.call('gameClaimQuest', undone[0].id), 'invalid');
+  await no('GAME: чужого задания нет', G2.call('gameClaimQuest', 'nope'), 'not_found');
+  await db.query(`update game_daily set progress = '{"distance":99999,"coins":99999,"cargo":999,"runs":99,"jumps":999,"ducks":999,"clean":9}' where user_id = $1`, [G2.id]);
+  const coinsBefore = (await G2.call('gameState')).body.coins;
+  await ok('GAME: награда за задание', G2.call('gameClaimQuest', undone[0].id), (b) => b.coins === coinsBefore + GC.questById(undone[0].id).reward && b.quests.find((q) => q.id === undone[0].id).claimed === true);
+  await no('GAME: повторно не получить', G2.call('gameClaimQuest', undone[0].id), 'conflict');
+  // гараж
+  await no('GAME: без бонусов не купить', G2.call('gameBuy', { kind: 'truck', id: 'fura' }), 'invalid');
+  await no('GAME: нет такой машины', G2.call('gameBuy', { kind: 'truck', id: 'tank' }), 'not_found');
+  await no('GAME: неверный вид покупки', G2.call('gameBuy', { kind: 'coins', id: 'van' }), 'invalid');
+  await no('GAME: некупленную не выбрать', G2.call('gameSelect', { kind: 'truck', id: 'fura' }), 'forbidden');
+  await db.query('update game_profiles set coins = 20000 where user_id = $1', [G2.id]);
+  await ok('GAME: покупка машины сразу выбирает её', G2.call('gameBuy', { kind: 'truck', id: 'fura' }), (b) => b.coins === 4000 && b.truck === 'fura' && b.trucks.includes('fura'));
+  await no('GAME: второй раз не купить', G2.call('gameBuy', { kind: 'truck', id: 'fura' }), 'conflict');
+  await ok('GAME: покупка цвета', G2.call('gameBuy', { kind: 'paint', id: 'gold' }), (b) => b.coins === 2500 && b.paint === 'gold');
+  await ok('GAME: выбор своей машины', G2.call('gameSelect', { kind: 'truck', id: 'van' }), (b) => b.truck === 'van');
+  await ok('GAME: улучшение', G2.call('gameUpgrade', 'magnet'), (b) => b.upgrades.magnet === 1 && b.coins === 2350);
+  await no('GAME: нет такого улучшения', G2.call('gameUpgrade', 'rocket'), 'not_found');
+  await db.query(`update game_profiles set coins = 99999, upgrades = '{"magnet":5}' where user_id = $1`, [G2.id]);
+  await no('GAME: выше максимума нельзя', G2.call('gameUpgrade', 'magnet'), 'conflict');
+  // надбавка машины и дневной потолок
+  await db.query("update game_profiles set truck = 'fura', trucks = '{van,fura}' where user_id = $1", [G2.id]);
+  const FR = await ok('GAME: заезд на фуре', G2.call('gameStart', { endless: true })); await backdate(FR.run_id, 100);
+  await ok('GAME: надбавка машины считается на сервере', G2.call('gameFinish', FR.run_id, { distance: 1000, coins: 100, cargo: 0, hits: 1 }), (b) => b.earned === 115 + 20);
+  await db.query('update game_daily set earned = $2 where user_id = $1 and day = current_date', [G2.id, GC.DAILY_CAP - 10]);
+  const CP = await ok('GAME: заезд у потолка', G2.call('gameStart', { endless: true })); await backdate(CP.run_id, 100);
+  await ok('GAME: дневной потолок', G2.call('gameFinish', CP.run_id, { distance: 1000, coins: 100, cargo: 0, hits: 1 }), (b) => b.earned === 10 && b.capped === true);
+  // достижения
+  await db.query("update game_profiles set total_distance = 10000 where user_id = $1", [G2.id]);
+  await no('GAME: достижение ещё не выполнено', G2.call('gameClaimMilestone', 'star45'), 'invalid');
+  await no('GAME: нет такого достижения', G2.call('gameClaimMilestone', 'nope'), 'not_found');
+  const c0 = (await G2.call('gameState')).body.coins;
+  await ok('GAME: награда за достижение', G2.call('gameClaimMilestone', 'km10'), (b) => b.coins === c0 + 200 && b.milestones.find((m) => m.id === 'km10').claimed === true);
+  await no('GAME: повторно не получить', G2.call('gameClaimMilestone', 'km10'), 'conflict');
+  // данные игры стираются вместе с аккаунтом и не видны другим
+  await no('GAME: чужой заезд не завершить', G.call('gameFinish', FR.run_id, {}), 'not_found');
+  await ok('GAME: удаление аккаунта', G2.call('deleteAccount'));
+  check('GAME: игровых данных не осталось', (await db.query('select (select count(*) from game_profiles where user_id = $1)::int + (select count(*) from game_runs where user_id = $1)::int + (select count(*) from game_daily where user_id = $1)::int as n', [G2.id])).rows[0].n === 0);
+  await ok('GAME: обслуживание чистит старые заезды', db.query("update game_runs set started_at = now() - interval '40 days' where user_id = $1", [G.id]).then(() => db.query('select maintenance() as r')).then((r) => ({ status: 200, body: r.rows[0].r })), (b) => b.game_runs >= 1);
 
   // ===== ТЗ: документы =====
   for (const [doc, file] of [['terms', 'terms.html'], ['privacy', 'privacy.html'], ['additional', 'additional-data.html']]) {

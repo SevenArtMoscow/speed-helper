@@ -6,6 +6,7 @@ import { commonRoutes, earlierDataCheck } from './screens-common.js';
 import { workerRoutes } from './screens-worker.js';
 import { contractorRoutes } from './screens-contractor.js';
 import { adminRoutes } from './screens-admin.js';
+import { gameRoutes } from './screens-game.js';
 
 const app = document.getElementById('app');
 
@@ -31,7 +32,7 @@ const splash = (() => {
   return { step, finish };
 })();
 splash.step(18);
-const ROUTES = [...commonRoutes, ...workerRoutes, ...contractorRoutes, ...adminRoutes];
+const ROUTES = [...commonRoutes, ...workerRoutes, ...contractorRoutes, ...adminRoutes, ...(CONFIG.GAME_ENABLED ? gameRoutes : [])];
 const ctx = { main: null, acts: {}, poll: null, cleanup: null,
   render(html, { full = false } = {}) { this.main.className = full ? 'nopad' : ''; this.main.style.overflow = full ? 'hidden' : ''; this.main.innerHTML = html; } };
 export { ctx };
@@ -44,7 +45,7 @@ const TABS = {
 
 function shell() {
   app.innerHTML = `${MODE === 'local' ? '<div class="banner">Локальный режим: данные хранятся только в этом браузере</div>' : ''}
-    <div class="top">${logo()}<div class="sp"></div><button class="iconbtn topbtn" data-act="top" id="topbtn" aria-label="Рейтинг исполнителей" hidden>${ICON.trophy}</button><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
+    <div class="top">${logo()}<div class="sp"></div>${CONFIG.GAME_ENABLED ? '<button class="iconbtn gamebtn" data-act="game" id="gamebtn" aria-label="Игра Рейс" hidden>🚚</button>' : ''}<button class="iconbtn topbtn" data-act="top" id="topbtn" aria-label="Рейтинг исполнителей" hidden>${ICON.trophy}</button><button class="iconbtn bellbtn" data-act="bell" aria-label="Уведомления">${ICON.bell}<span class="badge" id="bell" hidden></span></button></div>
     <main id="main"></main><nav class="tabs" id="tabs" hidden></nav>`;
   ctx.main = $('#main');
   app.addEventListener('click', async (e) => {
@@ -54,6 +55,7 @@ function shell() {
     if (name === 'back') return back();
     if (name === 'bell') return go('#/notifications');
     if (name === 'top') return go('#/w/top');
+    if (name === 'game' || name === 'openGame') return go('#/game');
     if (name === 'call') return callSheet(el.dataset.phone, el.dataset.name);
     const fn = ctx.acts[name]; if (!fn) return;
     haptic('light');
@@ -65,7 +67,8 @@ function shell() {
 export function renderTabs(hash) {
   const t = $('#tabs'), tabs = TABS[S.role];
   const tb = $('#topbtn'); if (tb) tb.hidden = S.role !== 'worker';
-  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
+  const gb = $('#gamebtn'); if (gb) gb.hidden = !S.role || hash === '#/game' || hash === '#/consent' || hash === '#/welcome' || hash.includes('onboard');
+  if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash === '#/game' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
   t.hidden = false;
   const unread = unreadOf(S.user, S.role);
   t.innerHTML = tabs.map(([h, ic, l, center]) => `<a href="${h}" class="${center ? 'center ' : ''}${hash.startsWith(h) || (h === '#/w/search' && (hash.startsWith('#/w/shift') || hash === '#/w/skipped')) || (h === '#/c/shifts' && hash.startsWith('#/c/shift/')) || (h === '#/c/home' && hash.startsWith('#/c/workers')) || (h === '#/w/mine' && hash.startsWith('#/review/')) ? 'on' : ''}"><span class="ic">${ICON[ic]}</span>${l}</a>`).join('');
