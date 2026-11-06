@@ -67,6 +67,7 @@ export const ICON = {
   cal: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
   clock: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   crown: svg('<path d="M4 8l4 4 4-7 4 7 4-4-2 11H6z"/><path d="M6.5 19.5h11"/>'),
+  chev: svg('<path d="m9 6 6 6-6 6"/>'),
   plus: svg('<path d="M12 5v14M5 12h14" stroke-width="2.6"/>'),
   trophy: svg('<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v3M9 20h6M10 16h4l.5 4h-5z"/>'),
   bookmark: svg('<path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/>'),
