@@ -37,7 +37,7 @@ PostgreSQL (Supabase): таблицы закрыты RLS без политик; 
 Уведомления: `notifications` → Edge Function `tg-notify` (Bot API). Пользователь получит сообщение, только если хоть раз нажал Start у бота.
 
 ## Не сделано (по ТЗ, не блокирует запуск)
-Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; ИИ-помощник на LLM (сейчас правила в `parseShiftText`); Sentry; нагрузочные тесты; staging-среда. Эксплуатация и безопасность — см. [OPERATIONS.md](OPERATIONS.md) и [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md).
+Документы исполнителя с выдачей доступа; Speed Score и «Рейтинг месяца»; Sentry; нагрузочные тесты; staging-среда. Эксплуатация и безопасность — см. [OPERATIONS.md](OPERATIONS.md) и [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md).
 
 ## Развёртывание Supabase
 1. Проект Supabase на аккаунте **владельцев** (ТЗ §45).

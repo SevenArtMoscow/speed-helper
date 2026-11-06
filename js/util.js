@@ -30,6 +30,34 @@ export const money = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`;
 export const timeRange = (s) => (s.until_done ? `с ${s.start} · до выполнения задачи` : `${s.start}–${s.end}`);
 export const payLabel = (s) => (s.pay_type === 'hour' ? `${money(s.pay)}/час` : money(s.pay));
 export const payNote = (s) => (s.pay_type === 'hour' ? `≈ ${money(s.total)} за ${s.until_done ? '8 часов' : 'смену'}` : '');
+// Текст смены: описание «Что нужно сделать?»; у старых смен без описания — прежнее название
+export const shiftText = (s) => (s.description || '').trim() || s.title || '';
+
+// ---------- срок выплаты ----------
+// Порядок вариантов задан ТЗ от 05.11.2026. Срок — обещание подрядчика: оплату через приложение он не запускает и выплату не подтверждает
+export const PAYOUT = [['date', 'Указать дату'], ['after_shift', 'Сразу после смены'], ['same_day', 'В день смены'], ['next_day', 'На следующий день'], ['week', 'Через неделю после смены'], ['month', 'Через месяц после смены']];
+const PAYOUT_TEXT = { after_shift: 'сразу после смены', same_day: 'в день смены', next_day: 'на следующий день', week: 'через неделю после смены', month: 'через месяц после смены' };
+// календарный месяц вперёд; если такого числа нет — последний день месяца
+export const addMonths = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); return isoDate(new Date(y, m - 1 + n, Math.min(d, new Date(y, m + n, 0).getDate()))); };
+// день окончания: ночная смена заканчивается на следующий день; у «до выполнения задачи» — день фактического завершения, пока его нет — null
+export const shiftEndDay = (s) => (s.until_done ? (s.completed_at ? MSK.format(new Date(s.completed_at)) : null) : s.end <= s.start ? addDays(s.date, 1) : s.date);
+// раньше этого дня конкретную дату выплаты поставить нельзя
+export const payoutMinDay = (s) => shiftEndDay({ ...s, completed_at: null }) || s.date;
+// когда обещана выплата: для относительных сроков — от окончания смены; null, если окончание ещё неизвестно
+export function payoutDay(s) {
+  if (s.payout_kind === 'date') return s.payout_date || null;
+  const end = s.payout_kind ? shiftEndDay(s) : null;
+  if (!end) return null;
+  return { after_shift: end, same_day: end, next_day: addDays(end, 1), week: addDays(end, 7), month: addMonths(end, 1) }[s.payout_kind] || null;
+}
+// «Выплата: 7 ноября», «Выплата: на следующий день»; у старых смен — «Срок выплаты не указан»
+export const payoutLabel = (s) => (!s.payout_kind ? 'Срок выплаты не указан' : `Выплата: ${s.payout_kind === 'date' ? dateLong(s.payout_date) : PAYOUT_TEXT[s.payout_kind] || ''}`);
+// подробно: для относительного срока показываем и день, если окончание уже известно
+export function payoutDetail(s) {
+  if (!s.payout_kind || s.payout_kind === 'date') return payoutLabel(s);
+  const day = payoutDay(s);
+  return payoutLabel(s) + (day ? ` (${dateLong(day)})` : s.until_done ? ' (от фактического завершения)' : '');
+}
 export const plural = (n, a, b, c) => { const k = Math.abs(n) % 100, l = k % 10; return k > 10 && k < 20 ? c : l > 1 && l < 5 ? b : l === 1 ? a : c; };
 
 export function dist(lat1, lon1, lat2, lon2) {

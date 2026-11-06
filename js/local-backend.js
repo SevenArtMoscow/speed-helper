@@ -1,7 +1,7 @@
 // Локальный движок: повторяет правила серверных RPC (см. supabase/migrations) на localStorage.
 // Нужен для разработки/проверки без Supabase. В нём НЕТ демо-смен: база пустая, пока пользователи сами не создадут данные.
 import { CONFIG } from './config.js';
-import { dist, isWeekend, todayISO, addDays, uid } from './util.js';
+import { dist, isWeekend, todayISO, addDays, uid, PAYOUT, payoutMinDay } from './util.js';
 import { TRUCKS, PAINTS, UPGRADE_COST, QUESTS, MILESTONES, DAILY_BONUS, DAILY_CAP, levelOfXp, levelById, truckById } from './game-core.js';
 
 const KEY = 'sh_local_db_v1';
@@ -11,7 +11,7 @@ const WORKER_WEIGHTS = { name: 15, city: 10, age: 15, avatar: 10, phone: 5, abou
 const fresh = () => ({
   seq: 1, users: [], workers: {}, contractors: {}, drafts: {},
   categories: DEFAULT_CATEGORIES.map((name, i) => ({ id: i + 1, name, active: true })),
-  shifts: [], applications: [], members: [], messages: [], favorites: [], skips: [],
+  shifts: [], applications: [], members: [], messages: [], favorites: [], skips: [], shiftFavs: [],
   reviews: [], notifications: [], reports: [], events: [], audit: [], idem: {},
 });
 
@@ -71,8 +71,22 @@ function workerView(uidv, full) {
   return v;
 }
 
+// как на сервере (миграции 009 и 025): часы для почасовой оплаты, заголовок из начала описания, проверка срока выплаты
+const shiftHours = (s) => { if (s.until_done) return 8; const [a, b] = [s.start, s.end].map((t) => { const [x, y] = String(t).split(':'); return +x * 60 + +y; }); return Math.max(1, ((b - a + 1440) % 1440) / 60); };
+const titleFrom = (d) => { const t = String(d || '').replace(/\s+/g, ' ').trim(); if (t.length <= 60) return t; const cut = t.slice(0, 58).replace(/\s+\S*$/, '').replace(/[\s,.;:\-–—]+$/, ''); return (cut || t.slice(0, 58)) + '…'; };
+function payoutCheck(kind, pd, s) {
+  if (!kind) fail('invalid', 'Выберите срок выплаты');
+  if (!PAYOUT.some(([k]) => k === kind)) fail('invalid', 'Некорректный срок выплаты');
+  if (kind !== 'date') return;
+  const lim = payoutMinDay(s);
+  if (!pd) fail('invalid', 'Укажите дату выплаты');
+  if (pd < lim) fail('invalid', s.until_done ? 'Дата выплаты не может быть раньше даты смены' : 'Дата выплаты не может быть раньше окончания смены');
+  if (pd > addDays(lim, 366)) fail('invalid', 'Дата выплаты — не позже чем через год после смены');
+}
+
 function shiftView(s, me, origin) {
-  const v = { ...s, contractor: contractorView(s.contractor_id), accepted_count: acceptedCount(s.id), category_name: (db.categories.find((c) => c.id === s.category_id) || {}).name };
+  const v = { pay_type: 'shift', until_done: false, payout_kind: null, payout_date: null, completed_at: null, ...s, contractor: contractorView(s.contractor_id), accepted_count: acceptedCount(s.id), category_name: (db.categories.find((c) => c.id === s.category_id) || {}).name };
+  v.total = v.pay_type === 'hour' ? Math.round(v.pay * shiftHours(v)) : v.pay;
   if (origin && s.lat != null) v.distance_km = dist(origin.lat, origin.lng, s.lat, s.lng);
   if (me) { const a = db.applications.find((x) => x.shift_id === s.id && x.worker_id === me); v.my_status = a ? a.status : null; v.my_application_id = a ? a.id : null; }
   return v;
@@ -213,20 +227,29 @@ const API = {
     const t = todayISO();
     const skipped = new Set(db.skips.filter((s) => s.user_id === me).map((s) => s.shift_id));
     const applied = new Set(db.applications.filter((a) => a.worker_id === me).map((a) => a.shift_id));
-    let list = db.shifts.filter((s) => s.status === 'open' && !s.hidden && s.contractor_id !== me && s.date >= t && !applied.has(s.id) && (f.include_skipped || !skipped.has(s.id)));
+    const saved = new Set((db.shiftFavs || []).filter((x) => x.user_id === me).map((x) => x.shift_id));
+    let list = db.shifts.filter((s) => s.status === 'open' && !s.hidden && s.contractor_id !== me && s.date >= t && !applied.has(s.id) && (f.include_skipped || !skipped.has(s.id)) && (f.include_saved || !saved.has(s.id)));
     if (f.date === 'today') list = list.filter((s) => s.date === t);
     else if (f.date === 'tomorrow') list = list.filter((s) => s.date === addDays(t, 1));
     else if (f.date === 'weekend') list = list.filter((s) => isWeekend(s.date));
     if (f.min_pay) list = list.filter((s) => s.pay >= f.min_pay);
-    if (f.categories && f.categories.length) list = list.filter((s) => f.categories.includes(s.category_id));
-    if (f.similar_to) { const b = shiftOr404(f.similar_to); list = list.filter((s) => s.category_id === b.category_id && s.id !== b.id); }
+    // смены без категории попадают в общую выдачу и не пропадают при фильтре по видам работ
+    if (f.categories && f.categories.length) list = list.filter((s) => s.category_id == null || f.categories.includes(s.category_id));
+    if (f.similar_to) { const b = shiftOr404(f.similar_to); list = list.filter((s) => s.id !== b.id && (b.category_id == null || s.category_id === b.category_id)); }
     let out = list.map((s) => shiftView(s, me, origin));
     if (f.radius_km) out = out.filter((s) => s.distance_km == null || s.distance_km <= f.radius_km);
     out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start) || b.id - a.id);
     const off = f.offset || 0, lim = f.limit || 20;
     return { items: out.slice(off, off + lim), total: out.length, next: off + lim < out.length ? off + lim : null };
   },
-  getShift(me, sid) { actor(me); return shiftView(shiftOr404(sid), me, null); },
+  getShift(me, sid) { actor(me); return { ...shiftView(shiftOr404(sid), me, null), saved: (db.shiftFavs || []).some((f) => f.user_id === me && f.shift_id === sid) }; },
+  // «В избранное» на карточке смены (как shift_favs на сервере)
+  toggleShiftFav(me, sid) { actor(me); shiftOr404(sid); db.shiftFavs = db.shiftFavs || []; const i = db.shiftFavs.findIndex((f) => f.user_id === me && f.shift_id === sid); if (i >= 0) { db.shiftFavs.splice(i, 1); return false; } db.shiftFavs.push({ user_id: me, shift_id: sid, at: now() }); return true; },
+  savedShifts(me) {
+    actor(me); const t = todayISO();
+    return (db.shiftFavs || []).filter((f) => f.user_id === me).sort((a, b) => b.at - a.at).map((f) => db.shifts.find((s) => s.id === f.shift_id))
+      .filter((s) => s && s.status === 'open' && !s.hidden && s.date >= t && !db.applications.some((a) => a.shift_id === s.id && a.worker_id === me)).map((s) => ({ ...shiftView(s, me, null), saved: true }));
+  },
   skip(me, sid) { actor(me); if (!db.skips.find((s) => s.user_id === me && s.shift_id === sid)) db.skips.push({ user_id: me, shift_id: sid, at: now() }); return true; },
   unskip(me, sid) { actor(me); db.skips = db.skips.filter((s) => !(s.user_id === me && s.shift_id === sid)); return true; },
   mySkips(me) {
@@ -318,16 +341,24 @@ const API = {
     if (!owner.phone_verified && !owner.is_admin) fail('phone_unverified', 'Подтвердите номер телефона через Telegram, чтобы публиковать смены');
     if (db.drafts) delete db.drafts[me];
     return withIdem(me, reqId, () => {
-      const title = String(p.title || '').trim(), address = String(p.address || '').trim();
-      if (title.length < 3) fail('invalid', 'Укажите название смены');
-      if (!db.categories.find((c) => c.id === Number(p.category_id) && c.active)) fail('invalid', 'Выберите категорию');
+      let title = String(p.title || '').trim(), description = String(p.description || '').trim();
+      const address = String(p.address || '').trim(), cat = p.category_id ? Number(p.category_id) : null, ud = !!p.until_done;
+      if (title && title.length < 3) fail('invalid', 'Укажите название смены');
+      if (!description) description = title;
+      if (description.length < 3) fail('invalid', 'Опишите, что нужно сделать');
+      if (!title) title = titleFrom(description);
+      if (cat != null && !db.categories.find((c) => c.id === cat && c.active)) fail('invalid', 'Выберите категорию');
       if (address.length < 3) fail('invalid', 'Укажите адрес');
       if (!p.date || p.date < todayISO()) fail('invalid', 'Дата не может быть в прошлом');
-      if (!p.start || !p.end) fail('invalid', 'Укажите время начала и окончания');
+      if (!p.start || (!ud && !p.end)) fail('invalid', 'Укажите время начала и окончания');
+      if (!ud && p.start === p.end) fail('invalid', 'Время начала и окончания совпадает');
       if (!(Number(p.pay) > 0)) fail('invalid', 'Укажите оплату');
       if (!(Number(p.people) >= 1 && Number(p.people) <= 500)) fail('invalid', 'Укажите количество людей');
-      const s = { id: id(), contractor_id: me, title, category_id: Number(p.category_id), description: String(p.description || '').trim(), address, lat: p.lat ?? null, lng: p.lng ?? null,
-        date: p.date, start: p.start, end: p.end, pay: Math.round(Number(p.pay)), people: Math.round(Number(p.people)), requirements: arr(p.requirements), status: 'open', hidden: false, created_at: now() };
+      const end = ud ? '23:59' : p.end;
+      payoutCheck(p.payout_kind, p.payout_date, { date: p.date, start: p.start, end, until_done: ud });
+      const s = { id: id(), contractor_id: me, title, category_id: cat, description, address, lat: p.lat ?? null, lng: p.lng ?? null,
+        date: p.date, start: p.start, end, pay: Math.round(Number(p.pay)), people: Math.round(Number(p.people)), requirements: arr(p.requirements), status: 'open', hidden: false, created_at: now(),
+        pay_type: p.pay_type === 'hour' ? 'hour' : 'shift', until_done: ud, region: p.region === 'mo' ? 'mo' : 'msk', payout_kind: p.payout_kind, payout_date: p.payout_kind === 'date' ? p.payout_date : null };
       db.shifts.push(s);
       db.members.push({ shift_id: s.id, user_id: me, role: 'owner', perms: [], attended: null, at: now() });
       if (p.notify_favorites) {
@@ -355,14 +386,19 @@ const API = {
     const s = shiftOr404(sid);
     if (s.contractor_id !== me) fail('forbidden', 'Только владелец смены');
     if (!['open', 'full'].includes(s.status)) fail('closed', 'Смену уже нельзя изменить');
-    const allowed = ['pay', 'people', 'start', 'end', 'requirements', 'description'];
+    const allowed = ['pay', 'pay_type', 'until_done', 'people', 'start', 'end', 'requirements', 'description', 'payout_kind', 'payout_date'];
     const changed = [];
+    if (patch.until_done) patch = { ...patch, end: '23:59' };
+    if (patch.description !== undefined) { const d = String(patch.description || '').trim(); if (d && d.length < 3) fail('invalid', 'Опишите, что нужно сделать'); patch = { ...patch, description: d }; }
+    if (patch.payout_kind !== undefined) patch = { ...patch, payout_date: patch.payout_kind === 'date' ? patch.payout_date || null : null };
+    const next = { ...s, ...Object.fromEntries(allowed.filter((k) => patch[k] !== undefined).map((k) => [k, patch[k]])) };
+    if (next.payout_kind || patch.payout_kind !== undefined) payoutCheck(next.payout_kind, next.payout_date, next);
     for (const k of allowed) {
       if (patch[k] === undefined) continue;
       let v = patch[k];
       if (k === 'pay' || k === 'people') { v = Math.round(Number(v)); if (!(v > 0)) fail('invalid', 'Некорректное значение'); }
       if (k === 'people' && v < acceptedCount(sid)) fail('invalid', `Уже принято ${acceptedCount(sid)} чел.`);
-      if (JSON.stringify(s[k]) !== JSON.stringify(v)) { s[k] = v; if (k !== 'description') changed.push(k); }
+      if (JSON.stringify(s[k]) !== JSON.stringify(v)) { s[k] = v; if (k !== 'description') changed.push(k); else if (v) s.title = titleFrom(v); }
     }
     if (s.status === 'full' && acceptedCount(sid) < s.people) s.status = 'open';
     if (s.status === 'open' && acceptedCount(sid) >= s.people) s.status = 'full';

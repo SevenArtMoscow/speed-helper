@@ -1,9 +1,9 @@
 // Экраны подрядчика
 import { api, track } from './api.js';
 import { CONFIG } from './config.js';
-import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, openBot } from './ui.js';
+import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, toggle, refreshMe, validate, markError, clearError, reqMark, heroCard, infoRows, sect, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, openBot } from './ui.js';
 import { pickLocation, geocode, attachSuggest } from './maps.js';
-import { esc, dateLabel, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote } from './util.js';
+import { esc, dateLabel, dateLong, money, todayISO, addDays, uid, plural, fmtPhone, timeRange, payLabel, payNote, shiftText, PAYOUT, payoutMinDay, payoutDetail } from './util.js';
 import { reportSheet, finishShift, shiftName, askPhone } from './screens-common.js';
 import { profileBlock, roleSwitch, devPanel, bindCommonProfile, helpBlock, phoneStatus } from './screens-worker.js';
 import { gameBanner } from './screens-game.js';
@@ -56,52 +56,8 @@ async function workers(ctx) {
   ctx.acts.p = (el) => go('#/c/worker/' + el.dataset.id);
 }
 
-// ---------- создание ----------
-// Прототип «ИИ-помощника»: разбор обычной фразы правилами. Точка расширения — api.aiParseShift (LLM на сервере).
-// \b в JS не работает с кириллицей — границы слова задаём явно
-const W = (re) => new RegExp(`(^|[^а-яёa-z0-9])(?:${re})(?=[^а-яёa-z0-9]|$)`, 'i');
-const NUM_WORDS = [['одн(?:ого|а|у)?|один', 1], ['дв(?:а|е|ое|ух)', 2], ['тр(?:и|ое|ёх|ех)', 3], ['четыр(?:е|ёх|ех)|четверо', 4], ['пят(?:ь|еро|и)', 5], ['шест(?:ь|еро|и)', 6], ['сем(?:ь|еро|и)', 7], ['восем(?:ь|ь?ми)|восьмеро', 8], ['девят(?:ь|ь?и)', 9], ['десят(?:ь|еро|и)', 10]];
-const PEOPLE = '(?:человек[а]?|чел\\.?|грузчик[а-я]*|рабоч[а-я]*|работник[а-я]*|исполнител[а-я]*|помощник[а-я]*|промоутер[а-я]*|курьер[а-я]*|уборщ[а-я]*)';
-// «2 грузчика» в названии → «Грузчики»; «4 человека» → убираем
-const ROLE_TITLE = [[/грузчик/, 'Грузчики'], [/промоутер/, 'Промоутеры'], [/курьер/, 'Курьеры'], [/уборщ/, 'Уборщики'], [/помощник/, 'Помощники'], [/работник/, 'Работники'], [/рабоч/, 'Рабочие']];
-const COLLECTIVE = 'двое|трое|четверо|пятеро|шестеро|семеро|восьмеро';
-// порядок важен: более узкие категории — раньше
-const CAT_RULES = [[/разгру[зж]|погру[зж]|выгру[зж]|фур[уаы]/, 'Погрузка / разгрузка'], [/грузчик|переезд|мебел|такелаж/, 'Грузчики'], [/склад|комплект|сборк[аи] заказ|сортиров/, 'Склад / комплектация'],
-  [/убор|клининг|мыть|помыть|чистк/, 'Уборка'], [/курьер|доставк/, 'Курьеры'], [/промоут|листовк|флаер|раздач/, 'Промоутеры'], [/официант|кухн|повар|посуд|бармен|банкет/, 'Официанты / кухня'],
-  [/монтаж|демонтаж|стройк|строит|ремонт|сварщ|бетон/, 'Монтаж / стройка'], [/разнорабоч/, 'Разнорабочие']];
-const hh = (h, part) => { h = +h; if (/вечер|ночи|дня/.test(part || '') && h < 12) h += 12; return String(h % 24).padStart(2, '0'); };
-export function parseShiftText(text) {
-  const t = text.toLowerCase().replace(/ё/g, 'е'), out = {};
-  // люди: «4 человека», «нужны четверо грузчиков», «двое»
-  let m = t.match(new RegExp(`(\\d{1,3})\\s*${PEOPLE}`, 'i')); if (m) out.people = +m[1];
-  if (!out.people) for (const [re, n] of NUM_WORDS) if (W(re.replace(/ё/g, 'е')).test(t)) { out.people = n; break; }
-  // время: «с 9 до 18», «с 8:30 до 17:00», «с 9 утра до 6 вечера», «9-18»
-  m = t.match(/(?:с\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(утра|дня|вечера|ночи)?\s*(?:до|по|-|–)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(утра|дня|вечера|ночи)?/);
-  if (m && +m[1] <= 24 && +m[4] <= 24) { out.start = `${hh(m[1], m[3])}:${m[2] || '00'}`; out.end = `${hh(m[4], m[6])}:${m[5] || '00'}`; }
-  // оплата: «оплата 4500», «по 3 000 ₽», «4500р», «4 тыс»
-  // первая сумма от 100 ₽ («по 12» во времени — не оплата)
-  for (const re of [/(?:оплата|платим|плачу|за смену|по|зп)\s*(\d[\d ]{0,7}\d|\d)\s*(тыс)?/g, /(\d[\d ]{1,7}\d)\s*(?:₽|р(?![а-я])|руб)/g, /(\d{1,3})\s*(тыс)/g]) {
-    for (const x of t.matchAll(re)) { let p = +x[1].replace(/\s/g, ''); if (x[2]) p *= 1000; if (p >= 100 && p <= 1000000) { out.pay = p; break; } }
-    if (out.pay) break;
-  }
-  if (/послезавтра/.test(t)) out.date = addDays(todayISO(), 2); else if (/завтра/.test(t)) out.date = addDays(todayISO(), 1); else if (/сегодня/.test(t)) out.date = todayISO();
-  for (const [re, n] of CAT_RULES) if (re.test(t)) { const c = S.cats.find((x) => x.name === n); if (c) { out.category_id = c.id; break; } }
-  // название: фраза без даты, «нужны», количества людей, времени и оплаты
-  const roleWord = (s) => { const r = ROLE_TITLE.find(([re]) => re.test(s.toLowerCase())); return r ? ' ' + r[1] + ' ' : ' '; };
-  let title = text
-    .replace(/(?:оплата|платим|плачу|зп|по)\s*\d[\d ]*\s*(?:тыс[а-я.]*|₽|р\.?(?![а-я])|руб[а-я.]*)?(?:\s*за смену)?/gi, '')
-    .replace(/\d[\d ]*\s*(?:тыс[а-я.]*|₽|р\.?(?![а-я])|руб[а-я.]*)(?:\s*за смену)?/gi, '').replace(/за смену/gi, '')
-    .replace(/(?:с\s*)?\d{1,2}(?:[:.]\d{2})?\s*(?:утра|дня|вечера|ночи)?\s*(?:до|по|-|–)\s*\d{1,2}(?:[:.]\d{2})?\s*(?:утра|дня|вечера|ночи)?/i, '')
-    .replace(/(сегодня|послезавтра|завтра)/gi, '').replace(/(нуж(?:ен|на|но|ны)|требу[юе]тся|ищем|ищу|срочно)/gi, '')
-    .replace(new RegExp(`\\d{1,3}\\s*${PEOPLE}`, 'gi'), roleWord).replace(new RegExp(`(?:${NUM_WORDS.map(([r]) => r).join('|')})\\s+${PEOPLE}`, 'gi'), roleWord)
-    .replace(new RegExp(`(^|[^а-яё])(?:${COLLECTIVE})(?=[^а-яё]|$)`, 'gi'), '$1')
-    .replace(/\s+([,.])/g, '$1').replace(/([,.])(?:\s*[,.])+/g, '$1').replace(/\s{2,}/g, ' ').replace(/^[\s,.\-–]+|[\s,.\-–]+$/g, '');
-  title = title.charAt(0).toUpperCase() + title.slice(1);
-  out.title = (title.length >= 3 ? title : (S.cats.find((c) => c.id === out.category_id) || {}).name || text.trim()).slice(0, 60);
-  out.description = text.trim();
-  return out;
-}
-
+// ---------- создание и изменение смены ----------
+// Порядок полей задан ТЗ от 05.11.2026: что сделать, адрес, дата и люди, время, оплата, срок выплаты, «Дополнительно»
 async function createOrEdit(ctx, id) {
   const editing = !!id; id = Number(id);
   if (need()) return go('#/c/onboard');
@@ -112,41 +68,60 @@ async function createOrEdit(ctx, id) {
   const d = old || (draft && draft.form) || {};
   const reqs = new Set(d.requirements || []); const custom = (d.requirements || []).filter((r) => !BASE_TAGS.includes(r));
   let geo = d.lat != null ? { lat: d.lat, lng: d.lng, region: d.region } : null;
-  const reqId = (draft && draft.reqId) || uid(); // ключ идемпотентности: двойное нажатие «Создать» или возврат из бота не создадут две смены
+  const reqId = (draft && draft.reqId) || uid(); // ключ идемпотентности: двойное нажатие «Опубликовать» или возврат из бота не создадут две смены
   const lock = editing ? 'disabled' : '';
-  ctx.render(reqMark(`${pageHead(editing ? 'Изменить смену' : 'Новая смена')}${editing ? '<p class="mut sm">Можно менять оплату, количество людей, время, требования и описание. Для другого места или вида работ создайте новую смену.</p>' : `${draft ? '<div class="card row sp"><span class="sm">Черновик восстановлен</span><a class="g sm" href="#" data-act="dropDraft">Очистить</a></div>' : ''}<button class="btn block ghost" data-act="ai">✨ Заполнить с ИИ-ассистентом</button>`}
-    <label class="f">Название смены *</label><input class="i" id="title" value="${esc(d.title || '')}" placeholder="Например: Разгрузка мебели" ${lock}>
-    <label class="f">Категория *</label><select class="i" id="cat" ${lock}><option value="">Выберите…</option>${S.cats.map((c) => `<option value="${c.id}" ${String(d.category_id) === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-    <label class="f">Описание</label><textarea class="i" id="desc" placeholder="Что нужно делать">${esc(d.description || '')}</textarea>
+  // у старых смен и черновиков описания могло не быть — тогда показываем прежнее название, чтобы текст не потерялся
+  const text = shiftText(d);
+  ctx.render(reqMark(`${pageHead(editing ? 'Изменить смену' : 'Новая смена')}${editing ? '<p class="mut sm">Можно менять описание, время, количество людей, оплату, срок выплаты и требования. Для другого адреса или даты создайте новую смену.</p>' : draft ? '<div class="card row sp"><span class="sm">Черновик восстановлен</span><a class="g sm" href="#" data-act="dropDraft">Очистить</a></div>' : ''}
+    <label class="f">Что нужно сделать? *</label><textarea class="i" id="desc" rows="4" maxlength="3000" placeholder="Опишите работу: что нужно сделать, какой объём и что взять с собой">${esc(text)}</textarea>
     <label class="f">Адрес *</label><div class="row gap"><input class="i" id="addr" value="${esc(d.address || '')}" placeholder="Город, улица, дом" autocomplete="off" ${lock}>${editing ? '' : '<button class="btn" data-act="pin" aria-label="На карте">📍</button>'}</div><div class="sm ${geo ? 'g' : 'mut'}" id="geo">${geo ? '✓ Адрес на карте указан' : 'Начните вводить адрес и выберите его из подсказок'}</div>
-    <div class="grid2"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
-    <div class="grid2"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${d.until_done ? '' : esc(d.end || '18:00')}" ${d.until_done ? 'disabled' : ''}></div></div>
+    <div class="pair"><div><label class="f">Дата *</label><input class="i" id="date" type="date" min="${todayISO()}" value="${esc(d.date || addDays(todayISO(), 1))}" ${lock}></div><div><label class="f">Людей *</label><input class="i" id="people" type="number" inputmode="numeric" min="1" value="${esc(d.people || '')}"></div></div>
+    <div class="pair"><div><label class="f">Начало *</label><input class="i" id="start" type="time" value="${esc(d.start || '09:00')}"></div><div><label class="f">Окончание *</label><input class="i" id="end" type="time" value="${d.until_done ? '' : esc(d.end || '18:00')}" ${d.until_done ? 'disabled' : ''}></div></div>
     <div class="row sp" style="margin:10px 0"><span>До выполнения задачи<div class="mut sm">Без точного времени окончания: работаем, пока задача не сделана</div></span>${toggle(!!d.until_done, 'ud', 'id="ud"')}</div>
     <label class="f">Как платите</label><div class="seg" id="pt"><span class="chip" data-act="pt" data-v="shift">За смену</span><span class="chip" data-act="pt" data-v="hour">В час</span></div>
-    <label class="f" id="paylbl">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}"><p class="hint" id="payhint"></p>
-    <label class="f">Требования</label><div class="row wrap gap" id="reqs"></div>
-    ${editing ? '' : `<div class="row sp" style="margin:14px 0"><span>Уведомить работников из избранного<div class="mut sm">Это не приглашение и не подтверждение</div></span>${toggle(!!d.notify_favorites, 'tg', 'id="nf"')}</div>`}
-    <button class="btn pri block" data-act="save" style="margin-top:14px">${editing ? 'Сохранить' : 'Опубликовать смену'}</button>`));
-  const drawReqs = () => { document.getElementById('reqs').innerHTML = [...BASE_TAGS, ...custom].map((r) => `<span class="chip ${reqs.has(r) ? 'on' : ''}" data-act="req" data-r="${esc(r)}">${esc(r)}</span>`).join('') + '<span class="chip" data-act="addreq">＋ Своё</span>'; };
+    <label class="f" id="paylbl">Оплата за смену, ₽ *</label><input class="i" id="pay" type="number" inputmode="numeric" min="1" value="${esc(d.pay || '')}"><p class="hint" id="payhint">На одного человека</p>
+    <label class="f">Когда выплатите? *</label><select class="i" id="po"><option value="">Выберите срок выплаты</option>${PAYOUT.map(([v, t]) => `<option value="${v}" ${d.payout_kind === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <div id="podbox" ${d.payout_kind === 'date' ? '' : 'hidden'}><label class="f">Дата выплаты *</label><input class="i" id="pod" type="date" value="${esc(d.payout_date || '')}"><p class="hint" id="podhint"></p></div>
+    <button class="more" type="button" data-act="more" aria-expanded="false" aria-controls="morebox"><span class="grow"><b>Дополнительно</b><span class="mut sm" id="moresub"></span></span>${ICON.chev}</button>
+    <div id="morebox" hidden><label class="f">Требования</label><div class="row wrap gap" id="reqs"></div>
+    ${editing ? '' : `<div class="row sp" style="margin:14px 0 4px"><span>Уведомить работников из избранного<div class="mut sm">Это не приглашение и не подтверждение</div></span>${toggle(!!d.notify_favorites, 'tg', 'id="nf"')}</div>`}</div>
+    <button class="btn pri block" data-act="save" style="margin-top:16px">${editing ? 'Сохранить' : 'Опубликовать смену'}</button>`));
+  const $ = (i) => document.getElementById(i);
+  const val = (i) => $(i).value;
+  // «Дополнительно» свёрнуто; в подписи видно, что внутри уже выбрано
+  const moreSub = () => { const n = reqs.size, nf = $('nf')?.classList.contains('on'); $('moresub').textContent = n || nf ? [n && `${n} ${plural(n, 'требование', 'требования', 'требований')}`, nf && 'уведомим избранных'].filter(Boolean).join(' · ') : 'Требования и уведомления в избранном'; };
+  const drawReqs = () => { $('reqs').innerHTML = [...BASE_TAGS, ...custom].map((r) => `<span class="chip ${reqs.has(r) ? 'on' : ''}" data-act="req" data-r="${esc(r)}">${esc(r)}</span>`).join('') + '<span class="chip" data-act="addreq">＋ Своё</span>'; moreSub(); };
   drawReqs();
-  const val = (i) => document.getElementById(i).value;
+  ctx.acts.more = (el) => { const open = $('morebox').hidden; $('morebox').hidden = !open; el.setAttribute('aria-expanded', open); };
   // оплата «за смену / в час» и «до выполнения задачи»
   let ptype = d.pay_type || 'shift';
-  const ud = () => document.getElementById('ud').classList.contains('on');
+  const ud = () => $('ud').classList.contains('on');
+  // конкретная дата выплаты — не раньше окончания смены, а без точного окончания — не раньше даты начала. Проверяем при каждом изменении даты и времени
+  const shiftNow = () => ({ date: val('date'), start: val('start'), end: val('end'), until_done: ud() });
+  const podMin = () => (val('date') ? payoutMinDay(shiftNow()) : todayISO());
+  const podErr = () => (ud() ? 'Дата выплаты не может быть раньше даты смены' : 'Дата выплаты не может быть раньше окончания смены');
+  const syncPayout = () => {
+    const isDate = val('po') === 'date', min = podMin(), pod = $('pod');
+    $('podbox').hidden = !isDate; pod.min = min; $('podhint').textContent = `Не раньше ${dateLong(min)}`;
+    // после текущего события: подсветка поля сама снимается на «input», здесь ставим её заново, если дата всё ещё раньше допустимой
+    setTimeout(() => { if (val('po') === 'date' && pod.value && pod.value < podMin()) markError(pod, podErr()); else clearError(pod); });
+  };
   const syncPay = () => {
     document.querySelectorAll('#pt [data-v]').forEach((c) => c.classList.toggle('on', c.dataset.v === ptype));
-    document.getElementById('paylbl').innerHTML = ptype === 'hour' ? 'Ставка за час, ₽ <span class="req">*</span>' : 'Оплата за смену, ₽ <span class="req">*</span>';
-    const end = document.getElementById('end'), on = ud(); end.disabled = on; if (on) end.value = ''; else if (!end.value) end.value = '18:00';
+    $('paylbl').innerHTML = (ptype === 'hour' ? 'Оплата в час, ₽' : 'Оплата за смену, ₽') + ' <span class="req">*</span>';
+    const end = $('end'), on = ud(); end.disabled = on; if (on) end.value = ''; else if (!end.value) end.value = '18:00';
     const pay = Number(val('pay')); let h = 8;
     if (!on && val('start') && val('end')) { const [a, b] = [val('start'), val('end')].map((t) => { const [x, y] = t.split(':'); return +x * 60 + +y; }); h = ((b - a + 1440) % 1440) / 60 || 1; }
-    document.getElementById('payhint').textContent = ptype === 'hour' && pay > 0 ? `≈ ${money(Math.round(pay * h))} за ${on ? '8 часов' : Math.round(h * 10) / 10 + ' ч'}` : '';
+    $('payhint').textContent = 'На одного человека' + (ptype === 'hour' && pay > 0 ? ` · ≈ ${money(Math.round(pay * h))} за ${on ? '8 часов' : Math.round(h * 10) / 10 + ' ч'}` : '');
+    syncPayout();
   };
-  ['pay', 'start', 'end'].forEach((i) => document.getElementById(i).addEventListener('input', syncPay));
+  ['pay', 'start', 'end', 'date'].forEach((i) => $(i).addEventListener('input', syncPay));
+  $('po').addEventListener('change', syncPayout); $('pod').addEventListener('input', syncPayout);
   ctx.acts.pt = (el) => { ptype = el.dataset.v; syncPay(); };
   ctx.acts.ud = (el) => { el.classList.toggle('on'); el.setAttribute('aria-checked', el.classList.contains('on')); syncPay(); };
   syncPay();
   ctx.acts.req = (el) => { const r = el.dataset.r; reqs.has(r) ? reqs.delete(r) : reqs.add(r); drawReqs(); }; // повторное нажатие отключает тег
-  ctx.acts.tg = (el) => el.classList.toggle('on');
+  ctx.acts.tg = (el) => { el.classList.toggle('on'); moreSub(); };
   ctx.acts.addreq = () => {
     const s = sheet('<h3>Своё требование</h3><input class="i" id="nr" maxlength="40" placeholder="Например: опыт с мебелью"><button class="btn pri block" style="margin-top:12px" id="ok">Добавить</button>');
     s.el.querySelector('#ok').onclick = () => {
@@ -157,9 +132,9 @@ async function createOrEdit(ctx, id) {
     };
   };
   // ----- адрес: проверка существования через DaData (до номера дома) -----
-  const addrEl = document.getElementById('addr');
+  const addrEl = $('addr');
   let geoFor = geo ? addrEl.value : null, checkSeq = 0; // для какого текста адреса найдена точка
-  const geoInfo = (t, cls) => { const el = document.getElementById('geo'); if (el) { el.className = 'sm ' + cls; el.textContent = t; } };
+  const geoInfo = (t, cls) => { const el = $('geo'); if (el) { el.className = 'sm ' + cls; el.textContent = t; } };
   const setGeo = (p, address, text) => { geo = { lat: p.lat, lng: p.lng, region: p.region }; if (address) addrEl.value = address; geoFor = addrEl.value; geoInfo(text, 'g'); };
   const checkAddr = async () => {
     const q = addrEl.value.trim(), my = ++checkSeq;
@@ -183,41 +158,31 @@ async function createOrEdit(ctx, id) {
     const r = await pickLocation({ ...(geo || {}), query: val('addr') });
     if (r) setGeo(r, r.address, r.ok ? '✓ Адрес указан на карте' : '✓ Точка на карте указана — проверьте текст адреса');
   };
-  ctx.acts.ai = () => {
-    const s = sheet('<h3>ИИ-ассистент</h3><p class="mut sm">Опишите смену обычными словами — мы предложим заполнение полей, а вы проверите.</p><textarea class="i" id="t" placeholder="Завтра нужны четыре человека разгружать мебель в Химках с 9 до 18, оплата 4500"></textarea><button class="btn pri block" style="margin-top:12px" id="ok">Заполнить</button>');
-    s.el.querySelector('#ok').onclick = () => {
-      const r = parseShiftText(s.el.querySelector('#t').value); s.close();
-      const set = (i, v) => v != null && (document.getElementById(i).value = v);
-      set('title', r.title); set('desc', r.description); set('people', r.people); set('start', r.start); set('end', r.end); set('pay', r.pay); set('date', r.date); set('cat', r.category_id);
-      toast('Проверьте поля и укажите адрес на карте');
-    };
-  };
-  const $ = (i) => document.getElementById(i);
   // общие проверки для создания и изменения
-  const timeChecks = () => {
-    const ppl = Number(val('people')), pay = Number(val('pay'));
+  const checks = () => {
+    const ppl = Number(val('people')), pay = Number(val('pay')), po = val('po');
     return [
+      [$('desc'), val('desc').trim().length >= 3, 'Опишите, что нужно сделать'],
       [$('people'), Number.isInteger(ppl) && ppl >= 1 && ppl <= 500, 'Сколько людей нужно (1–500)'],
       [$('start'), !!val('start'), 'Укажите время начала'],
       [$('end'), ud() || (!!val('end') && val('end') !== val('start')), val('end') ? 'Окончание совпадает с началом' : 'Укажите время окончания или «до выполнения задачи»'],
-      [$('pay'), Number.isInteger(pay) && pay >= 1 && pay <= 1000000, pay > 1000000 ? 'Слишком большая сумма (до 1 000 000 ₽)' : 'Укажите оплату за смену в рублях'],
+      [$('pay'), Number.isInteger(pay) && pay >= 1 && pay <= 1000000, pay > 1000000 ? 'Слишком большая сумма (до 1 000 000 ₽)' : 'Укажите сумму оплаты в рублях'],
+      [$('po'), !!po, 'Выберите срок выплаты'],
+      ...(po === 'date' ? [[$('pod'), !!val('pod') && val('pod') >= podMin(), val('pod') ? podErr() : 'Укажите дату выплаты']] : []),
     ];
   };
+  const payout = () => ({ payout_kind: val('po'), payout_date: val('po') === 'date' ? val('pod') : null });
   ctx.acts.save = async () => {
     if (editing) {
-      if (!validate(timeChecks())) return;
-      await api.updateShift(id, { pay: val('pay'), pay_type: ptype, until_done: ud(), people: val('people'), start: val('start'), end: val('end'), description: val('desc').trim(), requirements: [...reqs] });
+      if (!validate(checks())) return;
+      await api.updateShift(id, { description: val('desc').trim(), pay: val('pay'), pay_type: ptype, until_done: ud(), people: val('people'), start: val('start'), end: val('end'), requirements: [...reqs], ...payout() });
       toast('Смена обновлена', 'ok'); return go('#/c/shift/' + id);
     }
     const addrOk = await checkAddr();
-    if (!validate([
-      [$('title'), val('title').trim().length >= 3, 'Название — хотя бы 3 буквы'],
-      [$('cat'), !!val('cat'), 'Выберите категорию'],
-      [addrEl, addrOk, val('addr').trim() ? 'Адрес не найден — выберите его из подсказок или поставьте точку 📍' : 'Укажите адрес'],
-      [$('date'), !!val('date') && val('date') >= todayISO(), val('date') ? 'Дата уже прошла' : 'Укажите дату'],
-      ...timeChecks(),
-    ])) return;
-    const form = { title: val('title'), category_id: val('cat'), description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), pay_type: ptype, until_done: ud(), region: geo.region, people: val('people'), requirements: [...reqs], notify_favorites: document.getElementById('nf').classList.contains('on') };
+    const list = checks();
+    list.splice(1, 0, [addrEl, addrOk, val('addr').trim() ? 'Адрес не найден — выберите его из подсказок или поставьте точку 📍' : 'Укажите адрес'], [$('date'), !!val('date') && val('date') >= todayISO(), val('date') ? 'Дата уже прошла' : 'Укажите дату']);
+    if (!validate(list)) return;
+    const form = { description: val('desc').trim(), address: val('addr'), lat: geo.lat, lng: geo.lng, date: val('date'), start: val('start'), end: val('end'), pay: val('pay'), pay_type: ptype, until_done: ud(), region: geo.region, people: val('people'), requirements: [...reqs], notify_favorites: $('nf').classList.contains('on'), ...payout() };
     // номер ещё не подтверждён: сохраняем черновик и просим подтвердить; запрет публикации проверяет и сервер
     if (!S.user.phone_verified) return holdForPhone(form);
     let s;
@@ -246,9 +211,9 @@ async function shiftPage(ctx, id) {
     const [s, apps] = await Promise.all([api.getShift(id), api.applicants(id)]);
     const active = ['open', 'full'].includes(s.status), owner = s.contractor_id === S.user.id;
     const groups = [['pending', 'Новые отклики'], ['accepted', 'Приняты'], ['completed', 'Участвовали'], ['rejected', 'Отклонены'], ['cancelled', 'Отказались / исключены']];
-    const html = `${pageHead('Смена')}<div class="card"><div class="row sp"><h2 style="margin:0">${esc(s.title)}</h2><span>${s.boosted ? '<span class="tag o">⚡ В топе</span> ' : ''}${statusTag(s.status)}</span></div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}${payNote(s) ? ` (${esc(payNote(s))})` : ''}<br>${esc(s.address)}</div>
+    const html = `${pageHead('Смена')}<div class="card"><div class="row sp" style="align-items:flex-start;gap:10px"><h2 class="sh-full" style="margin:0">${esc(shiftText(s))}</h2><span style="flex:none">${s.boosted ? '<span class="tag o">⚡ В топе</span> ' : ''}${statusTag(s.status)}</span></div><div class="mut sm" style="margin:6px 0">${esc(dateLabel(s.date))} · ${esc(timeRange(s))} · ${esc(payLabel(s))}${payNote(s) ? ` (${esc(payNote(s))})` : ''}<br>${esc(s.address)}</div><div class="sm payout">${esc(payoutDetail(s))}</div>
       <div class="row sp sm"><span>👥 ${s.accepted_count} / ${s.people}</span></div><div class="bar" style="margin:6px 0"><i style="width:${Math.min(100, (s.accepted_count / s.people) * 100)}%"></i></div>
-      ${s.description ? `<p class="mut sm">${esc(s.description)}</p>` : ''}${(s.requirements || []).map((r) => `<span class="tag">${esc(r)}</span> `).join('')}
+      ${(s.requirements || []).map((r) => `<span class="tag">${esc(r)}</span> `).join('')}
       ${active ? (owner ? '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="edit">Изменить</button><button class="btn sm" data-act="team">Команда и чат</button><button class="btn sm pri" data-act="fin">Смена завершена</button>' + (CONFIG.PRO_ENABLED ? '<button class="btn sm" data-act="boost">⚡ В топ</button>' : '') + '<button class="btn sm danger" data-act="cancel">Отменить</button></div>' : '<div class="row gap wrap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда и чат</button></div><p class="mut sm">Вы — админ чата этой смены: можно принимать и отклонять отклики.</p>') : (s.status === 'completed' ? '<div class="row gap" style="margin-top:12px"><button class="btn sm" data-act="team">Команда</button><button class="btn sm pri" data-act="rate">Оценить исполнителей</button></div>' : '')}</div>
       <h2>Отклики · ${apps.length}</h2>${apps.length ? groups.map(([st, t]) => { const l = apps.filter((a) => a.status === st); return l.length ? `<div class="mut sm" style="margin:12px 0 4px">${t} · ${l.length}</div>` + l.map((a) => cand(a, active, s.status === 'open')).join('') : ''; }).join('') : '<p class="mut">Пока никто не откликнулся.</p>'}`;
     if (ctx.main.dataset.h !== html && !document.querySelector('.ov')) { ctx.main.innerHTML = html; ctx.main.dataset.h = html; }

@@ -4,7 +4,7 @@ import { CONFIG } from './config.js';
 import { localReset } from './local-backend.js';
 import { S, go, toast, errMsg, sheet, confirmBox, avatar, stars, pageHead, emptyState, verifiedTag, statusTag, setRole, refreshMe, heroCard, infoRows, pill, sect, ring, ICON, reviewsBlock, bindReviews, proCard, proBadge, haptic, tick, prefs, toggle } from './ui.js';
 import { createMap, placemark, shiftsLayer, routeLink } from './maps.js';
-import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce } from './util.js';
+import { esc, dateLabel, money, plural, phone10, fmtPhone, timeRange, payLabel, payNote, debounce, shiftText, payoutLabel, payoutDetail } from './util.js';
 import { reportSheet, shiftName, openLegal, openSupport, startPhoneCheck, LEGAL_TITLE, extraDataSheet } from './screens-common.js';
 import { gameBanner } from './screens-game.js';
 
@@ -15,13 +15,14 @@ const loadF = () => { try { const f = { ...defFilters(), ...JSON.parse(localStor
 const saveF = (f) => localStorage.setItem(FKEY, JSON.stringify(f));
 const needProfile = () => !S.user.roles.includes('worker');
 
-export const shiftCardBody = (s) => `<div class="row sp"><span class="row gap" style="flex-wrap:wrap"><span class="tag g">${esc(s.category_name || '')}</span>${s.boosted ? '<span class="tag o">⚡ В топе</span>' : ''}${s.contractor?.pro ? proBadge() : ''}</span><span class="mut sm">${s.region === 'mo' ? 'Московская обл.' : 'Москва'}</span></div>
-  <h1 style="margin:10px 0 2px">${esc(s.title)}</h1>
-  <div class="row gap wrap sm"><span>${esc(s.contractor?.company || s.contractor?.name || '')}</span>${verifiedTag(s.contractor?.verified, 'Проверенный подрядчик')}<span>${stars(s.contractor?.rating, s.contractor?.reviews)}</span></div>
-  <div class="pay" style="margin:12px 0 2px">${esc(payLabel(s))}</div>${payNote(s) ? `<div class="mut sm" style="margin-bottom:6px">${esc(payNote(s))}</div>` : '<div style="height:6px"></div>'}
+// Карточка смены (ТЗ от 05.11.2026): описание вместо названия, подрядчик и рейтинг, сумма, срок выплаты, дата и время, адрес, места.
+// В карточке длинное описание обрезается многоточием; full — страница «Подробнее»: полный текст, срок выплаты с датой и требования
+export const shiftCardBody = (s, full = false) => `<h1 class="sh-t${full ? ' full' : ''}">${esc(shiftText(s))}</h1>
+  <div class="row gap wrap sm"><span>${esc(s.contractor?.company || s.contractor?.name || '')}</span>${verifiedTag(s.contractor?.verified, 'Проверенный подрядчик')}<span>${stars(s.contractor?.rating, s.contractor?.reviews)}</span>${s.boosted ? '<span class="tag o">В топе</span>' : ''}${s.contractor?.pro ? proBadge() : ''}</div>
+  <div class="payrow"><span class="pay">${esc(payLabel(s))}</span><span class="mut sm">${esc(s.pay_type === 'hour' ? payNote(s) : 'за смену')}</span></div>
+  <div class="sm payout">${esc(full ? payoutDetail(s) : payoutLabel(s))}</div>
   <div class="lns"><div class="ln">${ICON.cal}<span>${esc(dateLabel(s.date))} · ${esc(timeRange(s))}</span></div><div class="ln">${ICON.pin}<span>${esc(s.address)}</span></div><div class="ln">${ICON.users}<span>Нужно ${s.people} ${plural(s.people, 'человек', 'человека', 'человек')} · осталось мест: ${Math.max(0, s.people - s.accepted_count)}</span></div></div>
-  ${s.description ? `<p class="mut" style="margin:10px 0 6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(s.description)}</p>` : ''}
-  ${(s.requirements || []).length ? `<div class="row wrap gap" style="margin-top:6px">${s.requirements.map((r) => `<span class="tag">${esc(r)}</span>`).join('')}</div>` : ''}`;
+  ${full && (s.requirements || []).length ? `<div class="mut sm" style="margin:12px 0 6px">Требования</div><div class="row wrap gap">${s.requirements.map((r) => `<span class="tag">${esc(r)}</span>`).join('')}</div>` : ''}`;
 
 // До отправки отклика исполнитель видит, что именно получит подрядчик (п. 3.1 соглашения, п. 5.2 политики)
 const applyNote = () => {
@@ -97,14 +98,14 @@ async function search(ctx) {
     if (!m) return; if (map) map.remove(); map = m;
     shiftsLayer(map, queue, (id) => {
       const s = queue.find((x) => x.id === id); if (!s) return;
-      const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${esc(payLabel(s))}</span><span class="mut sm">${s.region === 'mo' ? 'Московская обл.' : 'Москва'}</span></div><h3>${esc(s.title)}</h3><p class="mut sm">${esc(dateLabel(s.date))} · ${esc(timeRange(s))}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
+      const sh = sheet(`<div class="row sp"><span class="pay g" style="font-size:24px;font-weight:900">${esc(payLabel(s))}</span><span class="mut sm">${s.region === 'mo' ? 'Московская обл.' : 'Москва'}</span></div><h3 class="clamp2">${esc(shiftText(s))}</h3><p class="mut sm">${esc(payoutLabel(s))}<br>${esc(dateLabel(s.date))} · ${esc(timeRange(s))}<br>${esc(s.address)}</p><button class="btn pri block" data-o>Открыть</button>`);
       sh.el.querySelector('[data-o]').onclick = () => { sh.close(); go('#/w/shift/' + s.id); };
     });
   }
 
   function drawDeck(body) {
     if (!queue.length) { body.innerHTML = empty(); return; }
-    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><div class="rbw"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">${ICON.undo}</button><span>Вернуть</span></div><div class="rbw"><button class="rb no" data-act="skip" aria-label="Пропустить">${ICON.close}</button><span>Пропуск</span></div><div class="rbw"><button class="rb save" data-act="save" aria-label="Отложить на потом">${ICON.bookmark}</button><span>Отложить</span></div><div class="rbw"><button class="rb ok" data-act="like" aria-label="Откликнуться">${ICON.check}</button><span>Отклик</span></div></div><p class="mut sm" style="text-align:center;margin:0">Свайп вправо — отклик · влево — пропуск</p>${applyNote()}`;
+    body.innerHTML = `<div class="deck" id="deck"></div><div class="actions"><div class="rbw"><button class="rb undo" data-act="undo" ${hist ? '' : 'disabled'} aria-label="Вернуть">${ICON.undo}</button><span>Вернуть</span></div><div class="rbw"><button class="rb no" data-act="skip" aria-label="Пропустить">${ICON.close}</button><span>Пропуск</span></div><div class="rbw"><button class="rb save" data-act="save" aria-label="В избранное">${ICON.fav}</button><span>В избранное</span></div><div class="rbw"><button class="rb ok" data-act="like" aria-label="Откликнуться">${ICON.check}</button><span>Отклик</span></div></div><p class="mut sm" style="text-align:center;margin:0">Свайп вправо — отклик · влево — пропуск</p>${applyNote()}`;
     const deck = document.getElementById('deck');
     [queue[1], queue[0]].forEach((s, i) => { if (!s) return; const c = document.createElement('div'); c.className = 'sc' + (i === 0 ? ' behind' : ''); c.dataset.id = s.id; c.innerHTML = `<span class="stamp ok">ОТКЛИК</span><span class="stamp no">ПРОПУСК</span><div class="body">${shiftCardBody(s)}</div><button class="btn ghost sm" data-act="open" data-id="${s.id}" style="margin-top:8px">Подробнее</button>`; deck.appendChild(c); });
     bindDrag(deck.lastElementChild);
@@ -137,7 +138,7 @@ async function search(ctx) {
     queue.shift();
     try {
       if (kind === 'like') { const r = await api.apply(s.id); hist = { kind, s, dup: !!r.duplicate }; toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен — чат с подрядчиком уже в «Чатах»', 'ok'); track('swipe_right', { id: s.id }); track('application_sent', { id: s.id }); }
-      else if (kind === 'save') { await api.toggleShiftFav(s.id); hist = { kind, s }; toast('Смена отложена — она в «Избранном»', 'ok'); track('shift_saved', { id: s.id }); }
+      else if (kind === 'save') { await api.toggleShiftFav(s.id); hist = { kind, s }; toast('Смена добавлена в «Избранное»', 'ok'); track('shift_saved', { id: s.id }); }
       else { await api.skip(s.id); hist = { kind, s }; showSkips(skipCount + 1); track('swipe_left', { id: s.id }); }
     } catch (e) {
       queue.unshift(s); toast(errMsg(e), 'err');
@@ -212,7 +213,7 @@ async function skippedPage(ctx) {
   };
   ctx.render(`${pageHead('Пропущенные', '<button class="btn sm" data-act="all" id="skall" hidden>Вернуть все</button>')}
     <p class="mut sm" style="margin-top:0">Смены, которые вы смахнули влево. Верните их в ленту или откликнитесь сразу.</p>
-    <input class="i" id="skq" type="search" placeholder="🔍 Поиск: название, адрес, подрядчик" autocomplete="off"><div id="skl"></div>`);
+    <input class="i" id="skq" type="search" placeholder="Поиск: описание, адрес, подрядчик" autocomplete="off"><div id="skl"></div>`);
   draw();
   document.getElementById('skq').oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
   const drop = (id) => { list = list.filter((s) => s.id !== id); draw(); };
@@ -236,7 +237,7 @@ async function shiftPage(ctx, id) {
   const s = await api.getShift(id);
   const mine = s.contractor_id === S.user.id;
   const canApply = !mine && s.status === 'open' && !s.my_status;
-  ctx.render(`${pageHead('Смена', `<span class="row">${canApply ? `<button class="bm ${s.saved ? 'on' : ''}" data-act="bm" aria-label="Отложить на потом">${ICON.bookmark}</button>` : ''}<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button></span>`)}<div class="card">${shiftCardBody(s).replace('-webkit-line-clamp:3', '-webkit-line-clamp:99')}</div>
+  ctx.render(`${pageHead('Смена', `<span class="row">${canApply ? `<button class="bm ${s.saved ? 'on' : ''}" data-act="bm" aria-label="В избранное">${ICON.fav}</button>` : ''}<button class="iconbtn" data-act="rep" aria-label="Пожаловаться">⚑</button></span>`)}<div class="card">${shiftCardBody(s, true)}</div>
     <div class="card click row" data-act="contractor"><div>${avatar(s.contractor.avatar, s.contractor.name)}</div><div class="grow"><b>${esc(s.contractor.company || s.contractor.name)}</b><div class="sm">${stars(s.contractor.rating, s.contractor.reviews)} · ${s.contractor.shifts_done} ${plural(s.contractor.shifts_done, 'смена', 'смены', 'смен')}</div></div>›</div>
     ${s.lat != null ? `<div id="map" style="height:200px;border-radius:16px;overflow:hidden;margin:10px 0 4px"></div><a class="g sm" href="${routeLink(s.lat, s.lng)}" target="_blank" rel="noopener" data-act="route">🧭 Маршрут в Яндекс Картах</a>` : ''}
     ${s.my_status ? `<div class="card row sp"><span>Ваш отклик</span>${statusTag(s.my_status)}</div>${s.my_status === 'accepted' ? `<button class="btn pri block" data-act="team">Перейти в команду</button><div style="height:8px"></div>` : ''}<button class="btn block" data-act="dm">💬 Написать подрядчику</button>` : ''}
@@ -259,7 +260,7 @@ async function shiftPage(ctx, id) {
   ctx.acts.contractor = () => go('#/w/contractor/' + s.contractor.id);
   ctx.acts.team = () => go('#/team/' + id);
   ctx.acts.rep = () => reportSheet('shift', id);
-  ctx.acts.bm = async (el) => { const on = await api.toggleShiftFav(id); el.classList.toggle('on', on); toast(on ? 'Отложено — смена в «Избранном»' : 'Убрано из отложенных', 'ok'); };
+  ctx.acts.bm = async (el) => { const on = await api.toggleShiftFav(id); el.classList.toggle('on', on); toast(on ? 'Смена добавлена в «Избранное»' : 'Убрано из избранного', 'ok'); };
   track('shift_viewed', { id });
 }
 
@@ -297,9 +298,9 @@ async function fav(ctx) {
   const [list, saved] = await Promise.all([api.favorites('contractor'), api.savedShifts()]);
   let tab = sessionStorage.getItem('sh_favtab') || (saved.length || !list.length ? 'shifts' : 'c'), items = saved.slice();
   const draw = () => {
-    const head = `<h1>Избранное</h1><div class="tabsx"><span class="chip ${tab === 'shifts' ? 'on' : ''}" data-act="ftab" data-t="shifts">Отложенные смены${items.length ? ` · ${items.length}` : ''}</span><span class="chip ${tab === 'c' ? 'on' : ''}" data-act="ftab" data-t="c">Подрядчики${list.length ? ` · ${list.length}` : ''}</span></div>`;
-    const shiftsHtml = items.length ? '<p class="mut sm">Смены, которые вы отложили «на потом»</p>' + applyNote() + items.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div><div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="unsave" data-id="${s.id}">Убрать</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('')
-      : emptyState('Отложенных смен нет', 'Нажмите на закладку на карточке смены, чтобы вернуться к ней позже.', '<button class="btn pri" data-act="toSearch">К поиску смен</button>');
+    const head = `<h1>Избранное</h1><div class="tabsx"><span class="chip ${tab === 'shifts' ? 'on' : ''}" data-act="ftab" data-t="shifts">Смены${items.length ? ` · ${items.length}` : ''}</span><span class="chip ${tab === 'c' ? 'on' : ''}" data-act="ftab" data-t="c">Подрядчики${list.length ? ` · ${list.length}` : ''}</span></div>`;
+    const shiftsHtml = items.length ? '<p class="mut sm">Смены, которые вы добавили в избранное</p>' + applyNote() + items.map((s) => `<div class="card" data-id="${s.id}"><div class="click" data-act="open" data-id="${s.id}">${shiftCardBody(s)}</div><div class="row gap" style="margin-top:12px"><button class="btn sm grow" data-act="unsave" data-id="${s.id}">Убрать</button><button class="btn pri sm grow" data-act="apply" data-id="${s.id}">Откликнуться</button></div></div>`).join('')
+      : emptyState('Избранных смен нет', 'Нажмите «В избранное» на карточке смены, чтобы вернуться к ней позже.', '<button class="btn pri" data-act="toSearch">К поиску смен</button>');
     const cHtml = list.length ? '<p class="mut sm">Подрядчики, которых вы сохранили</p>' + list.map((c) => `<div class="card"><div class="row">${avatar(c.avatar, c.name)}<div class="grow"><b>${esc(c.company || c.name)}</b>${verifiedTag(c.verified, 'Проверенный')}<div class="sm">${stars(c.rating, c.reviews)}</div></div></div>${c.about ? `<p class="mut sm">${esc(c.about)}</p>` : ''}
       ${c.open_shifts ? '' : '<p class="mut sm">У этого подрядчика сейчас нет актуальных смен.</p>'}<button class="btn block sm" data-act="c" data-id="${c.id}">Посмотреть объявления</button></div>`).join('') : emptyState('Пока пусто', 'Добавляйте подрядчиков в избранное на странице подрядчика.');
     ctx.main.innerHTML = head + (tab === 'shifts' ? shiftsHtml : cHtml);
@@ -310,7 +311,7 @@ async function fav(ctx) {
   ctx.acts.c = (el) => go('#/w/contractor/' + el.dataset.id);
   ctx.acts.open = (el) => go('#/w/shift/' + el.dataset.id);
   ctx.acts.toSearch = () => go('#/w/search');
-  ctx.acts.unsave = async (el) => { const id = Number(el.dataset.id); await api.toggleShiftFav(id); drop(id); toast('Убрано из отложенных', 'ok'); };
+  ctx.acts.unsave = async (el) => { const id = Number(el.dataset.id); await api.toggleShiftFav(id); drop(id); toast('Убрано из избранного', 'ok'); };
   ctx.acts.apply = async (el) => {
     const id = Number(el.dataset.id);
     try { const r = await api.apply(id); drop(id); toast(r.duplicate ? 'Вы уже откликались' : 'Отклик отправлен', 'ok'); track('application_sent', { id, via: 'saved' }); }

@@ -53,6 +53,9 @@ test('обновление базы прежней версии', { timeout: 120
   assert.equal((await one(db, 'select phone_verified from users where id = 3')).phone_verified, '9160000001');
   // процент заполнения считается без медкнижки и не превышает 100
   assert.ok((await one(db, 'select _percent(w) as p from worker_profiles w where user_id = 1')).p <= 100);
+  // старая смена: название, категория и описание на месте, срок выплаты не назначен задним числом
+  const sj = (await one(db, 'select _shift_json(s, 3) as j from shifts s where id = 1')).j;
+  assert.equal(sj.title, 'Банкет'); assert.equal(sj.category_id, 1); assert.equal(sj.payout_kind, null); assert.equal(sj.payout_date, null);
   // сохранённый текст документов нельзя переписать
   await assert.rejects(db.query("update legal_versions set body = 'другое' where doc = 'terms'"));
   await assert.rejects(db.query("delete from legal_versions where doc = 'terms'"));

@@ -82,9 +82,14 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await no('createShift без профиля', X.call('createShift', {}, key()), 'profile_required');
 
   // ----- создание смены -----
-  const sp = { title: 'Разгрузка мебели', category_id: cats[0].id, description: 'тест', address: 'Москва, Тверская 1', lat: 55.76, lng: 37.61, date: day(1), start: '09:00', end: '18:00', pay: 3000, people: 2, requirements: ['18+'], notify_favorites: false };
+  const sp = { title: 'Разгрузка мебели', category_id: cats[0].id, description: 'тест', payout_kind: 'next_day', address: 'Москва, Тверская 1', lat: 55.76, lng: 37.61, date: day(1), start: '09:00', end: '18:00', pay: 3000, people: 2, requirements: ['18+'], notify_favorites: false };
   await no('createShift короткое название', C.call('createShift', { ...sp, title: 'аб' }, key()), 'invalid');
-  await no('createShift без категории', C.call('createShift', { ...sp, category_id: '' }, key()), 'invalid');
+  await no('createShift без описания и названия', C.call('createShift', { ...sp, title: '', description: '' }, key()), 'invalid');
+  await no('createShift несуществующая категория', C.call('createShift', { ...sp, category_id: 999999 }, key()), 'invalid');
+  await no('createShift без срока выплаты', C.call('createShift', { ...sp, payout_kind: '' }, key()), 'invalid');
+  await no('createShift неизвестный срок выплаты', C.call('createShift', { ...sp, payout_kind: 'tomorrow' }, key()), 'invalid');
+  await no('createShift «Указать дату» без даты', C.call('createShift', { ...sp, payout_kind: 'date' }, key()), 'invalid');
+  await no('createShift дата выплаты раньше смены', C.call('createShift', { ...sp, payout_kind: 'date', payout_date: day(0) }, key()), 'invalid');
   await no('createShift без адреса', C.call('createShift', { ...sp, address: '' }, key()), 'invalid');
   await no('createShift дата в прошлом', C.call('createShift', { ...sp, date: day(-1) }, key()), 'invalid');
   await no('createShift без даты', C.call('createShift', { ...sp, date: '' }, key()), 'invalid');
@@ -926,6 +931,55 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('GAME: удаление аккаунта', G2.call('deleteAccount'));
   check('GAME: игровых данных не осталось', (await db.query('select (select count(*) from game_profiles where user_id = $1)::int + (select count(*) from game_runs where user_id = $1)::int + (select count(*) from game_daily where user_id = $1)::int as n', [G2.id])).rows[0].n === 0);
   await ok('GAME: обслуживание чистит старые заезды', db.query("update game_runs set started_at = now() - interval '40 days' where user_id = $1", [G.id]).then(() => db.query('select maintenance() as r')).then((r) => ({ status: 200, body: r.rows[0].r })), (b) => b.game_runs >= 1);
+
+  // ===== ТЗ 05.11.2026: смена без названия и категории, срок выплаты =====
+  check('PAY: прежняя версия приложения: название и категория сохраняются', S1.title === 'Разгрузка мебели' && S1.category_id === cats[0].id && S1.payout_kind === 'next_day');
+  const oldc = await ok('PAY: прежняя версия без описания — описанием становится название', C.call('createShift', { ...sp, description: '', date: day(5) }, key()), (b) => b.description === 'Разгрузка мебели');
+  const pb = { description: 'Расставить стулья, встречать гостей и помочь убрать зал после мероприятия в большом конференц-зале', address: 'Москва, Охотный Ряд, 6', lat: 55.757, lng: 37.615,
+    date: day(5), start: '09:00', end: '18:00', pay: 4950, people: 2, payout_kind: 'date', payout_date: day(6) };
+  const PX = await ok('PAY: смена без названия и категории', C.call('createShift', pb, key()),
+    (b) => b.category_id === null && b.payout_kind === 'date' && b.payout_date === day(6) && b.description === pb.description && b.title.length <= 60 && b.title.endsWith('…') && pb.description.startsWith(b.title.slice(0, -1)));
+  await ok('PAY: смена без категории в общей ленте', W3.call('feed', { limit: 200 }), (b) => b.items.some((s) => s.id === PX.id && s.payout_date === day(6)));
+  await ok('PAY: и при фильтре по видам работ', W3.call('feed', { categories: [cats[0].id], limit: 200 }), (b) => b.items.some((s) => s.id === PX.id));
+  await ok('PAY: похожие на смену без категории', W3.call('feed', { similar_to: PX.id, include_skipped: true, limit: 200 }), (b) => b.items.length > 0 && !b.items.some((s) => s.id === PX.id));
+  await ok('PAY: похожие на смену с категорией — та же категория и смены без неё не путаются', W3.call('feed', { similar_to: S2.id, include_skipped: true, limit: 200 }), (b) => b.items.every((s) => s.category_id === cats[1].id));
+  for (const kind of ['after_shift', 'same_day', 'next_day', 'week', 'month']) await ok(`PAY: срок «${kind}», лишняя дата отбрасывается`, C.call('createShift', { ...pb, payout_kind: kind, payout_date: day(30) }, key()), (b) => b.payout_kind === kind && b.payout_date === null);
+  await ok('PAY: выплата в день дневной смены', C.call('createShift', { ...pb, payout_date: day(5) }, key()));
+  await no('PAY: выплата раньше дня смены', C.call('createShift', { ...pb, payout_date: day(4) }, key()), 'invalid');
+  await no('PAY: выплата дальше года', C.call('createShift', { ...pb, payout_date: day(5 + 400) }, key()), 'invalid');
+  await no('PAY: ночная смена: выплата в день начала раньше окончания', C.call('createShift', { ...pb, start: '22:00', end: '06:00', payout_date: day(5) }, key()), 'invalid');
+  await ok('PAY: ночная смена: выплата в день окончания', C.call('createShift', { ...pb, start: '22:00', end: '06:00', payout_date: day(6) }, key()));
+  await ok('PAY: «до выполнения задачи»: выплата в день начала', C.call('createShift', { ...pb, until_done: true, end: '', payout_date: day(5) }, key()), (b) => b.until_done && b.payout_date === day(5));
+  await no('PAY: «до выполнения задачи»: раньше дня начала нельзя', C.call('createShift', { ...pb, until_done: true, end: '', payout_date: day(4) }, key()), 'invalid');
+  await ok('PAY: «до выполнения задачи» с относительным сроком', C.call('createShift', { ...pb, until_done: true, end: '', payout_kind: 'week', payout_date: null }, key()), (b) => b.payout_kind === 'week');
+  // правка срока и времени: дата выплаты проверяется заново
+  await no('PAY: правка: дата выплаты раньше смены', C.call('updateShift', PX.id, { payout_kind: 'date', payout_date: day(4) }), 'invalid');
+  await no('PAY: правка: срок нельзя убрать', C.call('updateShift', PX.id, { payout_kind: '' }), 'invalid');
+  await ok('PAY: правка: через неделю', C.call('updateShift', PX.id, { payout_kind: 'week', payout_date: day(9) }), (b) => b.payout_kind === 'week' && b.payout_date === null);
+  await ok('PAY: правка: снова конкретная дата', C.call('updateShift', PX.id, { payout_kind: 'date', payout_date: day(5) }), (b) => b.payout_date === day(5));
+  await no('PAY: правка: ночное время переносит окончание на следующий день', C.call('updateShift', PX.id, { start: '22:00', end: '06:00' }), 'invalid');
+  await ok('PAY: правка: ночное время вместе с новой датой выплаты', C.call('updateShift', PX.id, { start: '22:00', end: '06:00', payout_kind: 'date', payout_date: day(6) }), (b) => b.start === '22:00' && b.payout_date === day(6));
+  await ok('PAY: правка описания обновляет заголовок', C.call('updateShift', PX.id, { description: 'Встретить гостей на входе' }), (b) => b.description === 'Встретить гостей на входе' && b.title === 'Встретить гостей на входе');
+  await no('PAY: правка: слишком короткое описание', C.call('updateShift', PX.id, { description: 'аб' }), 'invalid');
+  await ok('PAY: подписчики видят новые условия', W3.call('getShift', PX.id), (b) => b.payout_date === day(6) && b.completed_at === null);
+  // старая смена без срока: показывается как есть, правится без срока, срок можно добавить
+  const os = (await db.query("insert into shifts(contractor_id, title, category_id, address, date, start_time, end_time, pay, people) values ($1, 'Старая смена', $2, 'Москва, Тверская 1', current_date + 3, '09:00', '18:00', 2000, 1) returning id", [C.id, cats[0].id])).rows[0].id;
+  await db.query("insert into shift_members(shift_id, user_id, role) values ($1, $2, 'owner')", [os, C.id]);
+  await ok('PAY: старая смена без срока', W3.call('getShift', os), (b) => b.payout_kind === null && b.payout_date === null && b.title === 'Старая смена' && b.description === '' && b.category_id === cats[0].id);
+  await ok('PAY: старую смену можно править без срока', C.call('updateShift', os, { pay: 2100 }), (b) => b.pay === 2100 && b.payout_kind === null && b.title === 'Старая смена');
+  await ok('PAY: старой смене можно задать срок', C.call('updateShift', os, { payout_kind: 'same_day' }), (b) => b.payout_kind === 'same_day');
+  // черновик хранит срок выплаты
+  await ok('PAY: черновик со сроком', C.call('saveShiftDraft', { form: { ...pb, payout_kind: 'date', payout_date: day(7) }, reqId: key() }));
+  await ok('PAY: черновик возвращается без потерь', C.call('getShiftDraft'), (b) => b.form.payout_kind === 'date' && b.form.payout_date === day(7) && b.form.description === pb.description);
+  await ok('PAY: черновик удаляется', C.call('deleteShiftDraft'));
+  // остаток мест — по фактически принятым, а не по откликам
+  const pa = await ok('PAY: отклик на смену без категории', W3.call('apply', PX.id));
+  await ok('PAY: отклик не занимает место', W3.call('getShift', PX.id), (b) => b.accepted_count === 0);
+  await ok('PAY: принятие', C.call('decide', pa.id, 'accepted'));
+  await ok('PAY: принятый занимает место', W3.call('getShift', PX.id), (b) => b.accepted_count === 1 && b.people === 2);
+  await ok('PAY: отказ от участия', W3.call('withdraw', pa.id));
+  await ok('PAY: место освободилось', W3.call('getShift', PX.id), (b) => b.accepted_count === 0);
+  check('PAY: прежняя смена со старым описанием читается', oldc && oldc.title === 'Разгрузка мебели');
 
   // ===== ТЗ: документы =====
   for (const [doc, file] of [['terms', 'terms.html'], ['privacy', 'privacy.html'], ['additional', 'additional-data.html']]) {
