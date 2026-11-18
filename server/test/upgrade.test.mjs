@@ -31,6 +31,7 @@ test('обновление базы прежней версии', { timeout: 120
     insert into contractor_profiles(user_id, name, city, phone, about) values (3, 'С номером', 'Москва', '9169999999', 'о компании'), (4, 'Без номера', 'Москва', '9168888888', null);
     insert into shifts(id, contractor_id, title, category_id, address, date, start_time, end_time, pay, people, requirements) overriding system value values
       (1, 3, 'Банкет', 1, 'Москва', current_date + 1, '09:00', '18:00', 3000, 2, '{18+,Медкнижка}');
+    insert into notifications(user_id, type, text, link, tg_sent) values (1, 'announcement', 'Есть актуальные смены', '#/w/search', true), (2, 'announcement', 'Есть актуальные смены', '#/w/search', true);
   `);
 
   await apply(db, files.filter((f) => f.name >= '022'));
@@ -56,6 +57,9 @@ test('обновление базы прежней версии', { timeout: 120
   // старая смена: название, категория и описание на месте, срок выплаты не назначен задним числом
   const sj = (await one(db, 'select _shift_json(s, 3) as j from shifts s where id = 1')).j;
   assert.equal(sj.title, 'Банкет'); assert.equal(sj.category_id, 1); assert.equal(sj.payout_kind, null); assert.equal(sj.payout_date, null);
+  // рассылка, сделанная вручную до вкладки «Бот», видна в истории
+  const bc = await one(db, 'select b.audience, b.recipients, b.text, (select count(*)::int from notifications where broadcast_id = b.id) as linked from broadcasts b');
+  assert.equal(bc.audience, 'workers'); assert.equal(bc.recipients, 2); assert.equal(bc.linked, 2); assert.equal(bc.text, 'Есть актуальные смены');
   // сохранённый текст документов нельзя переписать
   await assert.rejects(db.query("update legal_versions set body = 'другое' where doc = 'terms'"));
   await assert.rejects(db.query("delete from legal_versions where doc = 'terms'"));

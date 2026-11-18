@@ -981,6 +981,34 @@ test('API: полный сценарий', { timeout: 180000 }, async (t) => {
   await ok('PAY: место освободилось', W3.call('getShift', PX.id), (b) => b.accepted_count === 0);
   check('PAY: прежняя смена со старым описанием читается', oldc && oldc.title === 'Разгрузка мебели');
 
+  // ===== Вкладка «Бот»: рассылки без программиста =====
+  await no('BOT: обычный пользователь не видит трафик', W1.call('adminBotStats'), 'forbidden');
+  await no('BOT: обычный пользователь не может разослать', C.call('adminBroadcast', { audience: 'workers', text: 'Привет' }), 'forbidden');
+  const bs = await ok('BOT: трафик', A.call('adminBotStats'), (b) => b.audience.workers > 0 && b.audience.contractors > 0 && b.audience.all >= b.audience.workers && b.days.length === 7 && typeof b.sent_7d === 'number');
+  await no('BOT: без адресатов', A.call('adminBroadcast', { audience: 'nobody', text: 'Привет' }), 'invalid');
+  await no('BOT: пустой текст', A.call('adminBroadcast', { audience: 'workers', text: '  ' }), 'invalid');
+  await no('BOT: слишком длинный текст', A.call('adminBroadcast', { audience: 'workers', text: 'а'.repeat(1001) }), 'invalid');
+  const nb0 = (await db.query("select count(*)::int as n from notifications where type = 'announcement'")).rows[0].n;
+  await ok('BOT: проверка на себе', A.call('adminBroadcast', { audience: 'workers', text: 'Проверка рассылки', test: true }), (b) => b.test && b.recipients === 1);
+  check('BOT: проверка уходит только админу и не попадает в историю', (await db.query("select count(*)::int as n, bool_and(user_id = $1) as me, bool_and(broadcast_id is null) as nohist from notifications where type = 'announcement' and text = 'Проверка рассылки'", [A.id])).rows[0].n === 1);
+  const bc = await ok('BOT: рассылка исполнителям', A.call('adminBroadcast', { audience: 'workers', text: 'Есть новые смены на завтра' }), (b) => b.id && b.recipients === bs.audience.workers);
+  check('BOT: каждому исполнителю — одно сообщение с кнопкой на поиск смен', (await db.query("select count(*)::int as n, count(distinct user_id)::int as u, bool_and(link = '#/w/search') as l from notifications where broadcast_id = $1", [bc.id])).rows.every((r) => r.n === bs.audience.workers && r.u === r.n && r.l));
+  check('BOT: заблокированным и тестовым не уходит', (await db.query('select count(*)::int as n from notifications n join users u on u.id = n.user_id where n.broadcast_id = $1 and (u.blocked or u.is_fake)', [bc.id])).rows[0].n === 0);
+  await ok('BOT: исполнитель видит объявление в уведомлениях', W1.call('notifications', 'worker'), (b) => b.some((n) => n.type === 'announcement' && n.text === 'Есть новые смены на завтра'));
+  await no('BOT: вторая рассылка сразу же не уходит', A.call('adminBroadcast', { audience: 'workers', text: 'Есть новые смены на завтра' }), 'conflict');
+  // бот обработал часть: одно доставлено, одно не дошло; остальные ещё в очереди
+  const ids = (await db.query('select id from notifications where broadcast_id = $1 order by id', [bc.id])).rows.map((r) => r.id);
+  await db.query("update notifications set tg_sent = true, tg_result = 'ok' where id = $1", [ids[0]]);
+  await db.query("update notifications set tg_sent = true, tg_result = 'unreachable' where id = $1", [ids[1]]);
+  await ok('BOT: история с итогами доставки', A.call('adminBroadcasts'), (b) => { const h = b.find((x) => x.id === bc.id); return h && h.delivered === 1 && h.unreachable === 1 && h.queued === ids.length - 2 && h.audience === 'workers' && !h.cancelled; });
+  const st = await ok('BOT: остановка', A.call('adminCancelBroadcast', bc.id), (b) => b.stopped === ids.length - 2);
+  check('BOT: неотправленные убраны и из уведомлений', (await db.query('select count(*)::int as n from notifications where broadcast_id = $1', [bc.id])).rows[0].n === 2);
+  await ok('BOT: в истории рассылка остановлена', A.call('adminBroadcasts'), (b) => { const h = b.find((x) => x.id === bc.id); return h.cancelled && h.queued === 0 && h.cancelled_count === st.stopped; });
+  await ok('BOT: после остановки можно разослать заново', A.call('adminBroadcast', { audience: 'contractors', text: 'Опубликуйте смены на выходные' }), (b) => b.recipients === bs.audience.contractors);
+  await ok('BOT: журнал действий админа', A.call('adminAudit'), (b) => b.some((x) => x.action === 'admin.broadcast') && b.some((x) => x.action === 'admin.broadcast_cancel'));
+  await no('BOT: остановить несуществующую', A.call('adminCancelBroadcast', 999999), 'not_found');
+  check('BOT: проверочных сообщений не прибавилось сверх ожидаемого', (await db.query("select count(*)::int as n from notifications where type = 'announcement'")).rows[0].n >= nb0 + 1);
+
   // ===== ТЗ: документы =====
   for (const [doc, file] of [['terms', 'terms.html'], ['privacy', 'privacy.html'], ['additional', 'additional-data.html']]) {
     const res = await fetch(ROOT + '/legal/' + file), html = await res.text();

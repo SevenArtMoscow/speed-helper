@@ -186,24 +186,29 @@ export function startBot({ pool, token, appUrl, admins = [], support = [], oldTo
         const { rows } = await pool.query(`select n.id, n.text, n.link, u.tg_id, u.blocked, u.is_fake from notifications n join users u on u.id = n.user_id
           where not n.tg_sent and n.created_at > now() - interval '1 day' order by n.id limit 50`);
         for (const n of rows) {
+          // итог отправки виден админам во вкладке «Бот»: ok, old (через прежний бот), unreachable (не запускал бота или заблокировал), skipped
+          let result = 'skipped';
           if (!n.blocked && !n.is_fake) { // тестовым (выдуманным) пользователям сообщения не отправляются
             try {
               await tg('sendMessage', { chat_id: n.tg_id, text: n.text, reply_markup: openBtn('Открыть SPEED HELPER', n.link || '') });
+              result = 'ok';
             } catch (e) {
               // 400/403 — пользователь не запускал бота или заблокировал его: повторять бессмысленно; 429/5xx — повторим позже
               if (e.status !== 400 && e.status !== 403) { console.error('notify failed', n.id, e.message); if (e.retryAfter) await sleep(e.retryAfter * 1000); break; }
+              result = 'unreachable';
               // на время переезда: человек ещё не нажал Start в новом боте — доставляем через прежний и зовём в новый
               if (old && username) {
-                await old('sendMessage', { chat_id: n.tg_id, text: `${n.text}\n\nℹ️ Бот переехал: нажмите Start в @${username}, чтобы уведомления приходили оттуда.`,
-                  reply_markup: { inline_keyboard: [[{ text: 'Открыть SPEED HELPER', web_app: { url: appUrl + (n.link ? '/?r=' + encodeURIComponent(n.link.replace(/^#/, '')) : '') } }], [{ text: `Перейти в @${username}`, url: `https://t.me/${username}?start=moved` }]] } }).catch(() => {});
+                const viaOld = await old('sendMessage', { chat_id: n.tg_id, text: `${n.text}\n\nℹ️ Бот переехал: нажмите Start в @${username}, чтобы уведомления приходили оттуда.`,
+                  reply_markup: { inline_keyboard: [[{ text: 'Открыть SPEED HELPER', web_app: { url: appUrl + (n.link ? '/?r=' + encodeURIComponent(n.link.replace(/^#/, '')) : '') } }], [{ text: `Перейти в @${username}`, url: `https://t.me/${username}?start=moved` }]] } }).then(() => true, () => false);
+                if (viaOld) result = 'old';
               }
             }
           }
-          await pool.query('update notifications set tg_sent = true where id = $1', [n.id]);
+          await pool.query('update notifications set tg_sent = true, tg_result = $2 where id = $1', [n.id, result]);
           await sleep(40); // лимит Bot API ~30 сообщений/сек
         }
         // старые неотправленные (например, после простоя) не шлём пачкой
-        await pool.query(`update notifications set tg_sent = true where not tg_sent and created_at <= now() - interval '1 day'`);
+        await pool.query(`update notifications set tg_sent = true, tg_result = 'expired' where not tg_sent and created_at <= now() - interval '1 day'`);
       } catch (e) { console.error('notify loop failed', e.message); }
       await sleep(3000);
     }

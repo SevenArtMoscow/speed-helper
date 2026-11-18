@@ -47,6 +47,7 @@ const FN_LIMITS = {
   logError: [[30, 60e3]], track: [[120, 60e3]], searchContractors: [[60, 60e3]], deleteAccount: [[3, 3600e3]], toggleFav: [[60, 60e3], [300, 3600e3]], toggleShiftFav: [[60, 60e3]],
   // тяжёлые выборки: защищают базу от «долбёжки» одним аккаунтом
   phoneSendCode: [[3, 60e3], [10, 3600e3]], phoneVerifyCode: [[10, 60e3], [30, 3600e3]], supportInbox: [[60, 60e3]], phoneReset: [[10, 3600e3]],
+  adminBroadcast: [[20, 3600e3]], adminCancelBroadcast: [[30, 3600e3]],
   acceptTerms: [[20, 60e3]], giveExtraConsent: [[30, 3600e3]], revokeExtraConsent: [[30, 3600e3]], saveShiftDraft: [[30, 60e3]],
   gameState: [[60, 60e3]], gameStart: [[30, 60e3], [400, 3600e3]], gameFinish: [[30, 60e3], [400, 3600e3]], gameBuy: [[30, 60e3]], gameSelect: [[60, 60e3]], gameUpgrade: [[30, 60e3]], gameClaimQuest: [[30, 60e3]], gameClaimMilestone: [[30, 60e3]], gameDailyBonus: [[10, 60e3]],
   feed: [[120, 60e3]], leaderboard: [[20, 60e3]], contractorPage: [[90, 60e3]], workerPage: [[90, 60e3]], userReviews: [[60, 60e3]], myDialogs: [[60, 60e3]], teamChats: [[60, 60e3]],

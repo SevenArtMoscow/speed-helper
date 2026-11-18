@@ -105,6 +105,10 @@ test('бот: приветствие с анимацией', { timeout: 45000 },
   const viaOld = log.find((x) => x.old && x.chat === 555);
   check('переезд: новый бот не может написать (нет Start) — уведомление пришло через прежний', viaOld && viaOld.full.startsWith('Вас приняли: «Склад»') && viaOld.full.includes('@new_bot'));
   check('переезд: кнопка уведомления ведёт на нужный экран', viaOld && JSON.stringify(viaOld.markup).includes(encodeURIComponent('/team/7')));
-  check('переезд: уведомление помечено отправленным', poolCalls.some((c) => String(c.sql).includes('tg_sent = true where id') && c.args[0] === 900));
+  check('переезд: уведомление помечено отправленным через прежний бот', poolCalls.some((c) => String(c.sql).includes('tg_result = $2') && c.args?.[0] === 900 && c.args?.[1] === 'old'));
+  notifRows = [{ id: 901, text: 'Есть актуальные смены', link: '#/w/search', tg_id: 5, blocked: false, is_fake: false }, { id: 902, text: 'Тест', link: '', tg_id: 6, blocked: true, is_fake: false }]; await wait(3500);
+  const res = (id) => (poolCalls.find((c) => String(c.sql).includes('tg_result = $2') && c.args?.[0] === id) || {}).args?.[1];
+  check('итог отправки: доставлено', res(901) === 'ok');
+  check('итог отправки: заблокированному не отправляется', res(902) === 'skipped' && !log.some((x) => x.chat === 6));
   assert.ok(!results.some((r) => r.startsWith('✗')), results.join(String.fromCharCode(10)));
 });

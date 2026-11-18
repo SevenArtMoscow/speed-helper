@@ -66,6 +66,8 @@ function shell() {
 
 export function renderTabs(hash) {
   const t = $('#tabs'), tabs = TABS[S.role];
+  // админке на компьютере нужно больше места: списки и таблицы шире обычного экрана приложения
+  $('#app')?.classList.toggle('wide', hash.startsWith('#/admin'));
   const tb = $('#topbtn'); if (tb) tb.hidden = S.role !== 'worker';
   const gb = $('#gamebtn'); if (gb) gb.hidden = !S.role || hash === '#/game' || hash === '#/consent' || hash === '#/welcome' || hash.includes('onboard');
   if (!tabs || hash.startsWith('#/team') || hash.startsWith('#/chat/') || hash.startsWith('#/admin') || hash === '#/welcome' || hash === '#/consent' || hash === '#/game' || hash.includes('onboard')) { t.hidden = true; if (tb) tb.hidden = true; return; }
