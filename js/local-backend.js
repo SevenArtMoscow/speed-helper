@@ -12,7 +12,7 @@ const fresh = () => ({
   seq: 1, users: [], workers: {}, contractors: {}, drafts: {},
   categories: DEFAULT_CATEGORIES.map((name, i) => ({ id: i + 1, name, active: true })),
   shifts: [], applications: [], members: [], messages: [], favorites: [], skips: [], shiftFavs: [],
-  reviews: [], notifications: [], reports: [], events: [], audit: [], idem: {},
+  reviews: [], notifications: [], reports: [], events: [], audit: [], idem: {}, broadcasts: [],
 });
 
 let db = load();
@@ -38,6 +38,8 @@ function nrole(n) {
   return null;
 }
 const forRole = (n, role) => !role || !nrole(n) || nrole(n) === role;
+// получатели рассылки: как _broadcast_targets на сервере
+const broadcastTargets = (aud) => db.users.filter((u) => !u.blocked && !u.deleted && (aud === 'workers' ? u.roles.includes('worker') : aud === 'contractors' ? u.roles.includes('contractor') : true)).map((u) => u.id);
 function notify(userId, type, text, link) { db.notifications.push({ id: id(), user_id: userId, type, text, link: link || null, read: false, at: now() }); }
 
 export const profilePercent = (w) => {
@@ -583,7 +585,37 @@ const API = {
       applications: db.applications.length, accepted: db.applications.filter((a) => ['accepted', 'completed'].includes(a.status)).length, completed_shifts: db.shifts.filter((s) => s.status === 'completed').length,
       reports_new: db.reports.filter((r) => r.status === 'new').length, active_24h: new Set(db.events.filter((e) => e.at > day).map((e) => e.user_id)).size, errors_24h: db.events.filter((e) => e.event === 'error' && e.at > day).length };
   },
-  adminUsers(me) { admin(me); return db.users.map((u) => ({ ...u, name: (db.workers[u.id] || db.contractors[u.id] || {}).name || u.first_name })).reverse(); },
+  // вкладка «Бот»: в локальном режиме Telegram нет, поэтому сообщения сразу считаются доставленными
+  adminBotStats(me) {
+    admin(me);
+    const day = 864e5, t = now(), aud = (a) => broadcastTargets(a).length, msk = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date(ms));
+    const sent = (from, to = Infinity) => db.notifications.filter((n) => n.at > from && n.at <= to).length;
+    const active = (from) => new Set(db.events.filter((e) => e.at > from).map((e) => e.user_id)).size;
+    const days = Array.from({ length: 7 }, (_, i) => msk(t - i * day)).map((d) => ({ date: d, new: db.users.filter((u) => msk(u.created_at || 0) === d).length, active: new Set(db.events.filter((e) => msk(e.at) === d).map((e) => e.user_id)).size, sent: db.notifications.filter((n) => msk(n.at) === d).length }));
+    return { audience: { workers: aud('workers'), contractors: aud('contractors'), all: aud('all') }, new_1d: db.users.filter((u) => u.created_at > t - day).length, new_7d: db.users.filter((u) => u.created_at > t - 7 * day).length,
+      active_1d: active(t - day), active_7d: active(t - 7 * day), sent_1d: sent(t - day), sent_7d: sent(t - 7 * day), unreachable_7d: 0, queue: 0, days };
+  },
+  adminBroadcast(me, p = {}) {
+    admin(me);
+    const aud = p.audience, text = String(p.text || '').trim();
+    if (!['workers', 'contractors', 'all'].includes(aud)) fail('invalid', 'Выберите, кому отправить');
+    if (text.length < 2) fail('invalid', 'Напишите текст рассылки');
+    if (text.length > 1000) fail('invalid', 'Текст длиннее 1000 знаков');
+    const link = { workers: '#/w/search', contractors: '#/c/home' }[aud] || null;
+    if (p.test) { notify(me, 'announcement', text, link); return { test: true, recipients: 1 }; }
+    db.broadcasts = db.broadcasts || [];
+    if (db.broadcasts.some((b) => b.at > now() - 120e3 && !b.cancelled)) fail('conflict', 'Рассылка только что отправлена. Следующую можно через пару минут');
+    const b = { id: id(), author: me, audience: aud, text, link, at: now(), cancelled: false }, to = broadcastTargets(aud);
+    db.broadcasts.push(b); to.forEach((u) => db.notifications.push({ id: id(), user_id: u, type: 'announcement', text, link, read: false, at: now(), broadcast_id: b.id }));
+    b.recipients = to.length; audit(me, 'admin.broadcast', { id: b.id, audience: aud, recipients: to.length });
+    return { id: b.id, recipients: to.length };
+  },
+  adminBroadcasts(me) {
+    admin(me);
+    return (db.broadcasts || []).slice().reverse().map((b) => { const l = db.notifications.filter((n) => n.broadcast_id === b.id); return { id: b.id, at: b.at, audience: b.audience, text: b.text, recipients: b.recipients, author: (db.contractors[b.author] || db.workers[b.author] || {}).name || 'Админ', cancelled: b.cancelled, cancelled_count: 0, queued: 0, delivered: l.length, unreachable: 0, skipped: 0, unknown: 0, read: l.filter((n) => n.read).length }; });
+  },
+  adminCancelBroadcast(me, bid) { admin(me); const b = (db.broadcasts || []).find((x) => x.id === bid); if (!b) fail('not_found', 'Рассылка не найдена'); b.cancelled = true; return { stopped: 0 }; },
+  adminUsers(me) { admin(me); return db.users.map((u) => ({ ...u, name: (db.workers[u.id] || db.contractors[u.id] || {}).name || u.first_name, verified: !!db.contractors[u.id]?.verified })).reverse(); },
   adminBlock(me, userId, blocked) { admin(me); const u = db.users.find((x) => x.id === userId); if (!u) fail('not_found'); if (u.is_admin) fail('forbidden'); u.blocked = !!blocked; audit(me, 'user.block', { userId, blocked }); return u; },
   adminVerify(me, cid, v) { admin(me); if (!db.contractors[cid]) fail('not_found'); db.contractors[cid].verified = !!v; audit(me, 'contractor.verify', { cid, v }); return true; },
   adminShifts(me) { admin(me); return db.shifts.map((s) => shiftView(s, null, null)).reverse(); },

@@ -227,7 +227,7 @@ const NT = {
   shift_completed: ['Смена завершена — оцените', 'check', 'o'], shift_closed: ['Смена завершена', 'info', 'o'], message: ['Новое сообщение', 'chats', 'b'], review: ['Вам поставили оценку', 'fav', 'y'],
   removed: ['Вас исключили из команды', 'close', 'r'], role: ['Роль в чате', 'shield', 'y'], shift_updated: ['Смена изменена', 'edit', 'y'], member_left: ['Участник отказался', 'user', 'r'],
   shift_overdue: ['Пора завершить смену', 'clock', 'o'], pro: ['Подписка PRO', 'crown', 'y'], saved_gone: ['Отложенная смена', 'bookmark', 'y'], new_shift_from_fav: ['Новая смена у вашего подрядчика', 'bolt', 'g'],
-  support: ['Поддержка', 'chats', 'b'],
+  support: ['Поддержка', 'chats', 'b'], announcement: ['Объявление', 'bell', 'g'],
 };
 // тело уведомления без повторов заголовка: только «кто / какая смена» и что делать дальше
 const NBODY = (n) => {
